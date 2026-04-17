@@ -1,0 +1,52 @@
+name: rimai_app
+description: Plataforma terapéutica adaptativa IA para niños con TEA
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  
+  # Navegación y estado
+  go_router: ^13.0.0
+  flutter_riverpod: ^2.5.0
+  
+  # HTTP y red
+  dio: ^5.4.0
+  
+  # Base de datos local (offline)
+  sqflite: ^2.3.0
+  path: ^1.9.0
+  
+  # Autenticación JWT
+  flutter_secure_storage: ^9.0.0
+  jwt_decoder: ^2.0.1
+  
+  # Notificaciones FCM
+  firebase_core: ^3.0.0
+  firebase_messaging: ^15.0.0
+  
+  # Cámara (IA-04 emocional)
+  camera: ^0.10.5
+  google_mlkit_face_detection: ^0.11.0
+  
+  # UI y accesibilidad
+  flutter_animate: ^4.5.0
+  cached_network_image: ^3.3.0
+  
+  # Reportes / exportación
+  pdf: ^3.10.0
+  share_plus: ^9.0.0
+  
+  # Conectividad (offline detection)
+  connectivity_plus: ^6.0.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+  mockito: ^5.4.0
+  build_runner: ^2.4.0
