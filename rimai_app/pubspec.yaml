@@ -9,6 +9,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+    uses-material-design: true
   
   # Navegación y estado
   go_router: ^13.0.0
@@ -36,6 +37,7 @@ dependencies:
   # UI y accesibilidad
   flutter_animate: ^4.5.0
   cached_network_image: ^3.3.0
+  google_fonts: ^6.2.1
   
   # Reportes / exportación
   pdf: ^3.10.0
