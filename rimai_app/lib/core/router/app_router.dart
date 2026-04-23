@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import 'package:rimai_app/adapters/input/screens/auth/register_screen.dart';
 import 'package:rimai_app/adapters/input/screens/auth/login_screen.dart';
+import 'package:rimai_app/adapters/input/screens/auth/auth_shell_screen.dart';
 import 'package:rimai_app/core/providers/auth_providers.dart';
 
 /// Proveedor del enrutador principal de la aplicación, conectado al estado de Riverpod.
@@ -38,29 +39,28 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       return null; // Permitir navegación
     },
     routes: [
-      GoRoute(
-        path: '/auth',
-        redirect: (_, __) => '/auth/login', // por defecto va a login
-      ),
-      GoRoute(
-        path: '/auth/login',
-        name: 'login',
-        pageBuilder: (context, state) => CustomTransitionPage(
-          child: const LoginScreen(),
-          transitionsBuilder: (context, animation, secondaryAnimation, child) {
-            return FadeTransition(opacity: animation, child: child);
-          },
-        ),
-      ),
-      GoRoute(
-        path: '/auth/register',
-        name: 'register',
-        pageBuilder: (context, state) => CustomTransitionPage(
-          child: const RegisterScreen(),
-          transitionsBuilder: (context, animation, secondaryAnimation, child) {
-            return FadeTransition(opacity: animation, child: child);
-          },
-        ),
+      ShellRoute(
+        builder: (context, state, child) => AuthShellScreen(child: child),
+        routes: [
+          GoRoute(
+            path: '/auth',
+            redirect: (_, __) => '/auth/login',
+          ),
+          GoRoute(
+            path: '/auth/login',
+            name: 'login',
+            pageBuilder: (context, state) => const NoTransitionPage(
+              child: LoginScreen(),
+            ),
+          ),
+          GoRoute(
+            path: '/auth/register',
+            name: 'register',
+            pageBuilder: (context, state) => const NoTransitionPage(
+              child: RegisterScreen(),
+            ),
+          ),
+        ],
       ),
       // --- Pantallas Mock para dashboards ---
       GoRoute(

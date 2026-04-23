@@ -4,12 +4,8 @@ import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import 'package:rimai_app/core/providers/auth_providers.dart';
-import 'package:rimai_app/adapters/input/widgets/brand_header.dart';
-import 'package:rimai_app/adapters/input/widgets/feature_panel.dart';
-import 'package:rimai_app/adapters/input/widgets/rimai_footer.dart';
 import 'package:rimai_app/adapters/input/widgets/rimai_text_field.dart';
 import 'package:rimai_app/adapters/input/widgets/error_banner.dart';
-import 'package:rimai_app/adapters/input/widgets/auth_tab_bar.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -74,123 +70,45 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFFFDFBF8),
-      body: SafeArea(
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(32, 24, 32, 40),
+      child: Form(
+        key: _formKey,
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const RimAIBrandHeader(),
-            Expanded(
-              child: Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 1024),
-                  child: LayoutBuilder(
-                    builder: (context, constraints) {
-                      final isDesktop = constraints.maxWidth >= 768; // asumiendo 768px+ para el panel
-
-                      if (isDesktop) {
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 48),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Expanded(
-                                flex: 5,
-                                child: RimAIFeaturePanel(),
-                              ),
-                              const SizedBox(width: 32),
-                              Expanded(
-                                flex: 6,
-                                child: _buildFormCard(context),
-                              ),
-                            ],
-                          ),
-                        );
-                      } else {
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 20),
-                          child: _buildFormCard(context),
-                        );
-                      }
-                    },
-                  ),
-                ),
-              ),
+            RimAIErrorBanner(message: _errorMessage),
+            RimAITextField(
+              label: 'Correo Electrónico',
+              placeholder: 'tu@email.com',
+              prefixIcon: Icons.mail_outline,
+              controller: _emailController,
+              keyboardType: TextInputType.emailAddress,
+              enabled: !_isLoading,
             ),
-            const RimAIFooter(),
+            const SizedBox(height: 24),
+            RimAITextField(
+              label: 'Contraseña',
+              placeholder: '••••••••',
+              prefixIcon: Icons.lock_outline,
+              controller: _passController,
+              obscureText: true,
+              showToggle: true,
+              enabled: !_isLoading,
+            ),
+            const SizedBox(height: 8),
+            _buildForgotPassword(),
+            const SizedBox(height: 16),
+            _buildLoginButton(),
+            const SizedBox(height: 24),
+            _buildDivider(),
+            const SizedBox(height: 24),
+            _buildSocialButtons(context),
+            const SizedBox(height: 32),
+            _buildRegisterLink(context),
           ],
         ),
       ),
-    );
-  }
-
-  Widget _buildFormCard(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFFFFF),
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF2D2A26).withValues(alpha: 0.04),
-            blurRadius: 40,
-            offset: const Offset(0, 12),
-          ),
-        ],
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _buildTabBar(context),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(32, 24, 32, 40),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  RimAIErrorBanner(message: _errorMessage),
-                  RimAITextField(
-                    label: 'Correo Electrónico',
-                    placeholder: 'tu@email.com',
-                    prefixIcon: Icons.mail_outline,
-                    controller: _emailController,
-                    keyboardType: TextInputType.emailAddress,
-                    enabled: !_isLoading,
-                  ),
-                  const SizedBox(height: 24),
-                  RimAITextField(
-                    label: 'Contraseña',
-                    placeholder: '••••••••',
-                    prefixIcon: Icons.lock_outline,
-                    controller: _passController,
-                    obscureText: true,
-                    showToggle: true,
-                    enabled: !_isLoading,
-                  ),
-                  const SizedBox(height: 8),
-                  _buildForgotPassword(),
-                  const SizedBox(height: 16),
-                  _buildLoginButton(),
-                  const SizedBox(height: 24),
-                  _buildDivider(),
-                  const SizedBox(height: 24),
-                  _buildSocialButtons(context),
-                  const SizedBox(height: 32),
-                  _buildRegisterLink(context),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTabBar(BuildContext context) {
-    return RimAIAuthTabBar(
-      activeTab: AuthTab.login,
-      onLoginTap: () {}, // ya estamos en login, no hace nada
-      onRegisterTap: () => context.go('/auth/register'),
     );
   }
 

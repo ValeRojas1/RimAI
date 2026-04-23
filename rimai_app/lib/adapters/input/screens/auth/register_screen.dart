@@ -5,12 +5,8 @@ import 'package:google_fonts/google_fonts.dart';
 
 import 'package:rimai_app/core/providers/auth_providers.dart';
 import 'package:rimai_app/domain/entities/registro_usuario_request.dart';
-import 'package:rimai_app/adapters/input/widgets/brand_header.dart';
-import 'package:rimai_app/adapters/input/widgets/feature_panel.dart';
-import 'package:rimai_app/adapters/input/widgets/rimai_footer.dart';
 import 'package:rimai_app/adapters/input/widgets/rimai_text_field.dart';
 import 'package:rimai_app/adapters/input/widgets/error_banner.dart';
-import 'package:rimai_app/adapters/input/widgets/auth_tab_bar.dart';
 
 class RegisterScreen extends ConsumerStatefulWidget {
   const RegisterScreen({super.key});
@@ -111,154 +107,64 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFFFDFBF8),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          child: Column(
-            children: [
-              const RimAIBrandHeader(),
-              Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 1024),
-                  child: LayoutBuilder(
-                    builder: (context, constraints) {
-                      final isDesktop = constraints.maxWidth >= 768;
-
-                      if (isDesktop) {
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 48),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Expanded(
-                                flex: 5,
-                                child: RimAIFeaturePanel(),
-                              ),
-                              const SizedBox(width: 32),
-                              Expanded(
-                                flex: 6,
-                                child: _buildFormCard(context),
-                              ),
-                            ],
-                          ),
-                        );
-                      } else {
-                        return Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 20),
-                          child: _buildFormCard(context),
-                        );
-                      }
-                    },
-                  ),
-                ),
-              ),
-              const RimAIFooter(),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildFormCard(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFFFFF),
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF2D2A26).withValues(alpha: 0.04),
-            blurRadius: 40,
-            offset: const Offset(0, 12),
-          ),
-        ],
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _buildTabBar(context),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(32, 24, 32, 40),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  RimAIErrorBanner(message: _errorMessage),
-                  
-                  // Wrap each field conditionally pointing error if Form validate fails
-                  // The manual validator is passed via RimAITextField logic...
-                  // Wait, RimAITextField doesn't use Form's native validator.
-                  // I will implement a quick validation locally or we use standard Form handling.
-                  // Since RimAITextField expects errorText locally, let's keep it simple for now
-                  // (the design requires errorText directly but for MVP we wrap it or rely on parent form if possible).
-                  // But the prompt states: Validator was inside TextFormField. 
-                  // Let's modify RimAITextField usages to standard TextFormField wrapper if needed, 
-                  // or just let it be. Let's wrap in TextFormField invisibly if needed, or update RimAITextField?
-                  // I'll update RimAITextField in another call if needed, but for now we'll use FormFields cleanly.
-                  // Wait! I didn't add validator to RimAITextField! 
-                  // Let's inject a standard FormField wrapping it for validation:
-                  FormField<String>(
-                    validator: _validateNombre,
-                    builder: (state) => RimAITextField(
-                      label: 'Nombre Completo',
-                      placeholder: 'Ej. Ana García',
-                      prefixIcon: Icons.person_outline,
-                      controller: _nombreController,
-                      keyboardType: TextInputType.name,
-                      enabled: !_isLoading,
-                      errorText: state.errorText,
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  
-                  FormField<String>(
-                    validator: _validateCorreo,
-                    builder: (state) => RimAITextField(
-                      label: 'Correo Electrónico',
-                      placeholder: 'tu@email.com',
-                      prefixIcon: Icons.mail_outline,
-                      controller: _correoController,
-                      keyboardType: TextInputType.emailAddress,
-                      enabled: !_isLoading,
-                      errorText: state.errorText,
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  
-                  FormField<String>(
-                    validator: _validateContrasena,
-                    builder: (state) => RimAITextField(
-                      label: 'Contraseña',
-                      placeholder: '••••••••',
-                      prefixIcon: Icons.lock_outline,
-                      controller: _contrasenaController,
-                      obscureText: true,
-                      showToggle: true,
-                      enabled: !_isLoading,
-                      errorText: state.errorText,
-                    ),
-                  ),
-                  
-                  const SizedBox(height: 32),
-                  _buildRegisterButton(),
-                  const SizedBox(height: 20),
-                  _buildTermsText(),
-                ],
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(32, 24, 32, 40),
+      child: Form(
+        key: _formKey,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            RimAIErrorBanner(message: _errorMessage),
+            
+            FormField<String>(
+              validator: _validateNombre,
+              builder: (state) => RimAITextField(
+                label: 'Nombre Completo',
+                placeholder: 'Ej. Ana García',
+                prefixIcon: Icons.person_outline,
+                controller: _nombreController,
+                keyboardType: TextInputType.name,
+                enabled: !_isLoading,
+                errorText: state.errorText,
               ),
             ),
-          ),
-        ],
+            const SizedBox(height: 24),
+            
+            FormField<String>(
+              validator: _validateCorreo,
+              builder: (state) => RimAITextField(
+                label: 'Correo Electrónico',
+                placeholder: 'tu@email.com',
+                prefixIcon: Icons.mail_outline,
+                controller: _correoController,
+                keyboardType: TextInputType.emailAddress,
+                enabled: !_isLoading,
+                errorText: state.errorText,
+              ),
+            ),
+            const SizedBox(height: 24),
+            
+            FormField<String>(
+              validator: _validateContrasena,
+              builder: (state) => RimAITextField(
+                label: 'Contraseña',
+                placeholder: '••••••••',
+                prefixIcon: Icons.lock_outline,
+                controller: _contrasenaController,
+                obscureText: true,
+                showToggle: true,
+                enabled: !_isLoading,
+                errorText: state.errorText,
+              ),
+            ),
+            
+            const SizedBox(height: 32),
+            _buildRegisterButton(),
+            const SizedBox(height: 20),
+            _buildTermsText(),
+          ],
+        ),
       ),
-    );
-  }
-
-  Widget _buildTabBar(BuildContext context) {
-    return RimAIAuthTabBar(
-      activeTab: AuthTab.register,
-      onLoginTap: () => context.go('/auth/login'),
-      onRegisterTap: () {}, // ya estamos en registro, no hace nada
     );
   }
 
