@@ -4,7 +4,8 @@ import 'package:google_fonts/google_fonts.dart';
 
 import 'core/router/app_router.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
   runApp(
     const ProviderScope(
       child: RimAIApp(),
@@ -12,15 +13,17 @@ void main() {
   );
 }
 
-class RimAIApp extends StatelessWidget {
+class RimAIApp extends ConsumerWidget {
   const RimAIApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final router = ref.watch(appRouterProvider);
+
     return MaterialApp.router(
       title: 'RimAI — Plataforma Terapéutica',
       debugShowCheckedModeBanner: false,
-      routerConfig: appRouter,
+      routerConfig: router,
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
