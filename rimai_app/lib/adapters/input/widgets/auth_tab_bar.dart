@@ -54,21 +54,12 @@ class _RimAIAuthTabBarState extends State<RimAIAuthTabBar> {
   void _handleTabTap(AuthTab targetTab) {
     if (_currentTab == targetTab) return;
 
-    // Actualizamos localmente para arrancar la animación
-    setState(() {
-      _currentTab = targetTab;
-    });
-
-    // Pequeño delay para que la transición de la píldora sea visible
-    // antes de que GoRouter desmonte la pantalla.
-    Future.delayed(const Duration(milliseconds: 150), () {
-      if (!mounted) return;
-      if (targetTab == AuthTab.login) {
-        widget.onLoginTap();
-      } else {
-        widget.onRegisterTap();
-      }
-    });
+    // Al usar ShellRoute no necesitamos delay artificial, Router se encarga.
+    if (targetTab == AuthTab.login) {
+      widget.onLoginTap();
+    } else {
+      widget.onRegisterTap();
+    }
   }
 
   @override
@@ -87,7 +78,7 @@ class _RimAIAuthTabBarState extends State<RimAIAuthTabBar> {
           children: [
             // ── Píldora blanca deslizante ──────────────────────────────
             AnimatedAlign(
-              duration: const Duration(milliseconds: 250),
+              duration: const Duration(milliseconds: 550),
               curve: Curves.easeOutCubic,
               alignment: _currentTab == AuthTab.login
                   ? Alignment.centerLeft

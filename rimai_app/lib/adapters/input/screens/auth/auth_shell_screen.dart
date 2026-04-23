@@ -96,10 +96,10 @@ class AuthShellScreen extends StatelessWidget {
           // Usamos AnimatedSize para que la carta cambie de altura suavemente
           // ya que el formulario de Registro es más alto que el de Login.
           AnimatedSize(
-            duration: const Duration(milliseconds: 300),
+            duration: const Duration(milliseconds: 550),
             curve: Curves.easeInOutCubic,
             child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 300),
+              duration: const Duration(milliseconds: 550),
               switchInCurve: Curves.easeOutCubic,
               switchOutCurve: Curves.easeInCubic,
               // Le damos una llave única dependiente de la URL para forzar la animación
