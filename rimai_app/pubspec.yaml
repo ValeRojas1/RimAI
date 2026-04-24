@@ -33,17 +33,23 @@ dependencies:
   camera: ^0.10.5
   google_mlkit_face_detection: ^0.11.0
   
+  
   # UI y accesibilidad
   flutter_animate: ^4.5.0
   cached_network_image: ^3.3.0
   google_fonts: ^6.2.1
+  animated_text_kit: ^4.2.2
+  shimmer: ^3.0.0
   
   # Reportes / exportación
   pdf: ^3.10.0
   share_plus: ^9.0.0
+  file_picker: ^8.0.0
   
   # Conectividad (offline detection)
   connectivity_plus: ^6.0.0
+  fl_chart: ^1.2.0
+  intl: ^0.20.2
 
 dev_dependencies:
   flutter_test:

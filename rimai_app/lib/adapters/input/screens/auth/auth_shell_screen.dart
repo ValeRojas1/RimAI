@@ -98,16 +98,7 @@ class AuthShellScreen extends StatelessWidget {
           AnimatedSize(
             duration: const Duration(milliseconds: 550),
             curve: Curves.easeInOutCubic,
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 550),
-              switchInCurve: Curves.easeOutCubic,
-              switchOutCurve: Curves.easeInCubic,
-              // Le damos una llave única dependiente de la URL para forzar la animación
-              child: KeyedSubtree(
-                key: ValueKey(location),
-                child: child,
-              ),
-            ),
+            child: child,
           ),
         ],
       ),

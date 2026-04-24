@@ -33,26 +33,41 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
   }
 
   String? _validateNombre(String? value) {
-    if (value == null || value.trim().length < 3) {
+    final text = _nombreController.text;
+    if (text.trim().isEmpty) {
+      return 'El nombre es requerido';
+    }
+    if (text.trim().length < 3) {
       return 'El nombre debe tener al menos 3 caracteres';
+    }
+    if (RegExp(r'[0-9]').hasMatch(text)) {
+      return 'El nombre no puede contener números';
     }
     return null;
   }
 
   String? _validateCorreo(String? value) {
-    if (value == null || value.trim().isEmpty) {
+    final text = _correoController.text;
+    if (text.trim().isEmpty) {
       return 'El correo electrónico es requerido';
     }
     final emailRegex = RegExp(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$');
-    if (!emailRegex.hasMatch(value.trim())) {
+    if (!emailRegex.hasMatch(text.trim())) {
       return 'Ingresa un correo electrónico válido';
     }
     return null;
   }
 
   String? _validateContrasena(String? value) {
-    if (value == null || value.length < 8) {
+    final text = _contrasenaController.text;
+    if (text.length < 8) {
       return 'La contraseña debe tener al menos 8 caracteres';
+    }
+    if (!RegExp(r'[A-Z]').hasMatch(text)) {
+      return 'La contraseña debe tener al menos una letra mayúscula';
+    }
+    if (!RegExp(r'[0-9]').hasMatch(text)) {
+      return 'La contraseña debe tener al menos un número';
     }
     return null;
   }
@@ -118,6 +133,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
             
             FormField<String>(
               validator: _validateNombre,
+              autovalidateMode: AutovalidateMode.onUserInteraction,
               builder: (state) => RimAITextField(
                 label: 'Nombre Completo',
                 placeholder: 'Ej. Ana García',
@@ -126,12 +142,14 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                 keyboardType: TextInputType.name,
                 enabled: !_isLoading,
                 errorText: state.errorText,
+                onChanged: (val) => state.didChange(val),
               ),
             ),
             const SizedBox(height: 24),
             
             FormField<String>(
               validator: _validateCorreo,
+              autovalidateMode: AutovalidateMode.onUserInteraction,
               builder: (state) => RimAITextField(
                 label: 'Correo Electrónico',
                 placeholder: 'tu@email.com',
@@ -140,12 +158,14 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                 keyboardType: TextInputType.emailAddress,
                 enabled: !_isLoading,
                 errorText: state.errorText,
+                onChanged: (val) => state.didChange(val),
               ),
             ),
             const SizedBox(height: 24),
             
             FormField<String>(
               validator: _validateContrasena,
+              autovalidateMode: AutovalidateMode.onUserInteraction,
               builder: (state) => RimAITextField(
                 label: 'Contraseña',
                 placeholder: '••••••••',
@@ -155,6 +175,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                 showToggle: true,
                 enabled: !_isLoading,
                 errorText: state.errorText,
+                onChanged: (val) => state.didChange(val),
               ),
             ),
             

@@ -11,6 +11,7 @@ class RimAITextField extends StatefulWidget {
   final bool showToggle;
   final String? errorText;
   final bool enabled;
+  final ValueChanged<String>? onChanged;
 
   const RimAITextField({
     super.key,
@@ -23,6 +24,7 @@ class RimAITextField extends StatefulWidget {
     this.showToggle = false,
     this.errorText,
     this.enabled = true,
+    this.onChanged,
   });
 
   @override
@@ -91,6 +93,7 @@ class _RimAITextFieldState extends State<RimAITextField> {
             keyboardType: widget.keyboardType,
             obscureText: _obscureText,
             enabled: widget.enabled,
+            onChanged: widget.onChanged,
             style: GoogleFonts.plusJakartaSans(
               fontSize: 15,
               color: const Color(0xFF63524E),

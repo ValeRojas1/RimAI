@@ -11,7 +11,7 @@ services:
       - "5432:5432"
     volumes:
       - rimai_pgdata:/var/lib/postgresql/data
-      - ./backend/sql/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./backend/sql/:/docker-entrypoint-initdb.d/
     networks:
       - rimai_net
     healthcheck:
@@ -19,6 +19,23 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: rimai_api
+    restart: always
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      JWT_SECRET: ${JWT_SECRET:-rimai-super-secret-key-2026}
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - rimai_net
 
   pgadmin:
     image: dpage/pgadmin4:latest

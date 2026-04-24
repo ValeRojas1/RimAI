@@ -29,6 +29,25 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     super.dispose();
   }
 
+  String? _validateCorreo(String? value) {
+    final text = _emailController.text;
+    if (text.trim().isEmpty) {
+      return 'El correo electrónico es requerido';
+    }
+    if (!text.contains('@')) {
+      return 'Ingresa un correo electrónico válido (debe contener @)';
+    }
+    return null;
+  }
+
+  String? _validateContrasena(String? value) {
+    final text = _passController.text;
+    if (text.isEmpty) {
+      return 'La contraseña es requerida';
+    }
+    return null;
+  }
+
   Future<void> _onIniciarSesion() async {
     if (!_formKey.currentState!.validate()) return;
 
@@ -78,23 +97,33 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             RimAIErrorBanner(message: _errorMessage),
-            RimAITextField(
-              label: 'Correo Electrónico',
-              placeholder: 'tu@email.com',
-              prefixIcon: Icons.mail_outline,
-              controller: _emailController,
-              keyboardType: TextInputType.emailAddress,
-              enabled: !_isLoading,
+            FormField<String>(
+              validator: _validateCorreo,
+              autovalidateMode: AutovalidateMode.onUserInteraction,
+              builder: (state) => RimAITextField(
+                label: 'Correo Electrónico',
+                placeholder: 'tu@email.com',
+                prefixIcon: Icons.mail_outline,
+                controller: _emailController,
+                keyboardType: TextInputType.emailAddress,
+                enabled: !_isLoading,
+                errorText: state.errorText,
+                onChanged: (val) => state.didChange(val),
+              ),
             ),
             const SizedBox(height: 24),
-            RimAITextField(
-              label: 'Contraseña',
-              placeholder: '••••••••',
-              prefixIcon: Icons.lock_outline,
-              controller: _passController,
-              obscureText: true,
-              showToggle: true,
-              enabled: !_isLoading,
+            FormField<String>(
+              validator: _validateContrasena,
+              builder: (state) => RimAITextField(
+                label: 'Contraseña',
+                placeholder: '••••••••',
+                prefixIcon: Icons.lock_outline,
+                controller: _passController,
+                obscureText: true,
+                showToggle: true,
+                enabled: !_isLoading,
+                errorText: state.errorText,
+              ),
             ),
             const SizedBox(height: 8),
             _buildForgotPassword(),

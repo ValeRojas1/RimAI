@@ -1,37 +1,34 @@
+import 'package:dio/dio.dart';
 import 'package:rimai_app/domain/entities/usuario.dart';
 import 'package:rimai_app/domain/entities/registro_usuario_request.dart';
 import 'package:rimai_app/domain/ports/output/auth_repository_port.dart';
 
-/// Adaptador de salida: implementación HTTP del repositorio de autenticación.
-/// Se comunica con el backend real a través de Dio (o puede ser mock).
+// Dispositivo físico con USB: usa 'adb reverse tcp:8000 tcp:8000' y deja localhost
+// Emulador Android: cambia a 10.0.2.2
+const String _kBaseUrl = 'http://localhost:8000';
+
+/// Adaptador de salida: implementación HTTP real del repositorio de autenticación.
+/// Se comunica con el backend FastAPI a través de Dio.
 class AuthRepositoryAdapter implements AuthRepositoryPort {
-  // TODO: inyectar instancia de Dio cuando el backend esté disponible.
-  // final Dio _dio;
-  // const AuthRepositoryAdapter(this._dio);
+  late final Dio _dio;
+
+  AuthRepositoryAdapter() {
+    _dio = Dio(BaseOptions(
+      baseUrl: _kBaseUrl,
+      connectTimeout: const Duration(seconds: 10),
+      receiveTimeout: const Duration(seconds: 10),
+    ));
+  }
 
   @override
   Future<Usuario> registrarUsuario(RegistroUsuarioRequest request) async {
-    // --- Implementación real con Dio (descomentar cuando el backend esté listo) ---
-    // final response = await _dio.post('/api/auth/register', data: {
-    //   'nombre_completo': request.nombreCompleto,
-    //   'correo': request.correo,
-    //   'contrasena': request.contrasena,
-    // });
-    // return Usuario(
-    //   id: response.data['id'],
-    //   nombreCompleto: response.data['nombre_completo'],
-    //   correo: response.data['correo'],
-    //   rol: response.data['rol'],
-    //   token: response.data['token'],
-    // );
-
-    // --- Mock temporal ---
-    await Future.delayed(const Duration(seconds: 2));
+    // El endpoint de registro no está en el MVP — redirigir a login con mock
+    await Future.delayed(const Duration(seconds: 1));
     return Usuario(
       id: 'mock-uid-001',
       nombreCompleto: request.nombreCompleto,
       correo: request.correo,
-      rol: 'tutor',
+      rol: 'terapeuta',
       token: 'mock-jwt-token',
     );
   }
@@ -41,14 +38,32 @@ class AuthRepositoryAdapter implements AuthRepositoryPort {
     required String correo,
     required String contrasena,
   }) async {
-    // --- Mock temporal ---
-    await Future.delayed(const Duration(seconds: 2));
-    return Usuario(
-      id: 'mock-uid-001',
-      nombreCompleto: 'Usuario Demo',
-      correo: correo,
-      rol: 'tutor',
-      token: 'mock-jwt-token',
-    );
+    try {
+      final response = await _dio.post(
+        '/api/auth/login',
+        data: {'email': correo, 'password': contrasena},
+      );
+
+      final data = response.data as Map<String, dynamic>;
+
+      return Usuario(
+        id: data['user_id'],
+        nombreCompleto: data['nombre'],
+        correo: correo,
+        rol: data['rol'],
+        token: data['access_token'],
+      );
+    } on DioException catch (e) {
+      final statusCode = e.response?.statusCode;
+      final message = e.response?.data?['detail'] ?? 'Error de conexión con el servidor';
+
+      if (statusCode == 401) {
+        throw Exception('Email o contraseña incorrectos');
+      } else if (statusCode == 403) {
+        throw Exception('Cuenta inactiva. Contacta al administrador.');
+      } else {
+        throw Exception('$message');
+      }
+    }
   }
 }
