@@ -1,0 +1,11 @@
+{
+  "$schema": "https://railway.app/textures.schema.json",
+  "build": {
+    "builder": "DOCKERFILE",
+    "watchPatterns": ["backend/**"] 
+  },
+  "deploy": {
+    "rootDirectory": "backend",
+    "numReplicas": 1
+  }
+}
