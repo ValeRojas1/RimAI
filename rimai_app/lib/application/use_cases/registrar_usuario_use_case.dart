@@ -3,12 +3,23 @@ import 'package:rimai_app/domain/entities/registro_usuario_request.dart';
 import 'package:rimai_app/domain/ports/input/registrar_usuario_port.dart';
 import 'package:rimai_app/domain/ports/output/auth_repository_port.dart';
 
+<<<<<<< HEAD
+=======
+import 'package:rimai_app/infrastructure/config/auth_storage_service.dart';
+
+>>>>>>> origin/AxlFix
 /// Caso de uso: Registrar Usuario.
 /// Orquesta la lógica de negocio entre el puerto de entrada y el repositorio.
 class RegistrarUsuarioUseCase implements RegistrarUsuarioPort {
   final AuthRepositoryPort _authRepository;
+<<<<<<< HEAD
 
   const RegistrarUsuarioUseCase(this._authRepository);
+=======
+  final AuthStorageService _authStorage;
+
+  const RegistrarUsuarioUseCase(this._authRepository, this._authStorage);
+>>>>>>> origin/AxlFix
 
   @override
   Future<Usuario> ejecutar(RegistroUsuarioRequest request) async {
@@ -23,7 +34,20 @@ class RegistrarUsuarioUseCase implements RegistrarUsuarioPort {
       throw ArgumentError('La contraseña debe tener al menos 8 caracteres.');
     }
 
+<<<<<<< HEAD
     return _authRepository.registrarUsuario(request);
+=======
+    final usuario = await _authRepository.registrarUsuario(request);
+    
+    // Guardar la sesión localmente
+    await _authStorage.saveSession(
+      token: usuario.token ?? '',
+      role: usuario.rol ?? '',
+      userId: usuario.id ?? '',
+    );
+    
+    return usuario;
+>>>>>>> origin/AxlFix
   }
 
   bool _esEmailValido(String email) {
