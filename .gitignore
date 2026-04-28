@@ -1,0 +1,9 @@
+# Variables de entorno — NUNCA subir a GitHub
+.env
+
+# Volúmenes de Docker
+rimai_pgdata/
+
+# IDE
+.vscode/settings.json
+.idea/
