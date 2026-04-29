@@ -39,7 +39,7 @@ class _ClinicalValidationScreenState extends ConsumerState<ClinicalValidationScr
         iconColor: const Color(0xFF4A624D),
         trailingWidget: IconButton(
           icon: const Icon(Icons.close, color: Color(0xFF58423B)),
-          onPressed: () => context.pop(),
+          onPressed: () => context.go('/terapeuta/dashboard'),
         ),
       ),
       body: SingleChildScrollView(
