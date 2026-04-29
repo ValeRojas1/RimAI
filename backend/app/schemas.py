@@ -19,6 +19,37 @@ class TokenResponse(BaseModel):
     rol: str
 
 
+# ── Admin ─────────────────────────────────────────────────────────────────────
+
+class UsuarioOut(BaseModel):
+    id: str
+    nombre: str
+    email: EmailStr
+    rol: str
+    activo: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class CrearUsuarioAdminRequest(BaseModel):
+    nombre: str
+    email: EmailStr
+    password: str
+    rol: str
+    especialidad: Optional[str] = None
+    colegiatura: Optional[str] = None
+
+class ActualizarEstadoUsuarioRequest(BaseModel):
+    activo: bool
+
+class AdminEstadisticasOut(BaseModel):
+    total_terapeutas: int
+    total_familias: int
+    total_ninos: int
+    total_sesiones: int
+
+
 # ── Pacientes (Dashboard) ─────────────────────────────────────────────────────
 
 class UltimaSesionInfo(BaseModel):
@@ -61,6 +92,13 @@ class PerfilNino(BaseModel):
     class Config:
         from_attributes = True
 
+
+class VincularPacienteRequest(BaseModel):
+    nombre: str
+    fecha_nacimiento: date
+    nivel_cognitivo: str
+    objetivos_intervencion: List[str]
+    perfil_sensorial: dict
 
 # ── Plan Terapéutico ──────────────────────────────────────────────────────────
 

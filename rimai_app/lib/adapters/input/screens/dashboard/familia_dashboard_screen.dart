@@ -16,7 +16,8 @@ class FamiliaDashboardScreen extends ConsumerStatefulWidget {
 
 class _FamiliaDashboardScreenState extends ConsumerState<FamiliaDashboardScreen> with SingleTickerProviderStateMixin {
   final _nameController = TextEditingController();
-  final _ageController = TextEditingController();
+  final _dateController = TextEditingController(); // Controlador visual para la fecha
+  DateTime? _selectedDate; // Fecha real seleccionada
   late TabController _tabController;
   bool _isDataLoaded = false;
   bool _isSaving = false;
@@ -42,7 +43,7 @@ class _FamiliaDashboardScreenState extends ConsumerState<FamiliaDashboardScreen>
   @override
   void dispose() {
     _nameController.dispose();
-    _ageController.dispose();
+    _dateController.dispose();
     _tabController.dispose();
     super.dispose();
   }
@@ -52,6 +53,33 @@ class _FamiliaDashboardScreenState extends ConsumerState<FamiliaDashboardScreen>
       if (set.contains(item)) set.remove(item);
       else set.add(item);
     });
+  }
+
+  Future<void> _selectDate(BuildContext context) async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate ?? DateTime.now().subtract(const Duration(days: 365 * 6)), // 6 años por defecto
+      firstDate: DateTime(2000),
+      lastDate: DateTime.now(),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.light(
+              primary: Color(0xFFB8D6B2),
+              onPrimary: Color(0xFF1E1B16),
+              onSurface: Color(0xFF1E1B16),
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+    if (picked != null && picked != _selectedDate) {
+      setState(() {
+        _selectedDate = picked;
+        _dateController.text = "${picked.year}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}";
+      });
+    }
   }
 
   @override
@@ -68,10 +96,8 @@ class _FamiliaDashboardScreenState extends ConsumerState<FamiliaDashboardScreen>
           if (data.pacientes.isNotEmpty && !_isDataLoaded) {
             final paciente = data.pacientes.first;
             _nameController.text = paciente.nombre;
-            _ageController.text = '${paciente.edad} años';
-            
-            // Si el backend mandara los datos ML, los poblaríamos aquí.
-            // Para este MVP los dejamos con defaults o lo que esté en memoria.
+            // Solo para mostrar visualmente, el backend no mandó la fecha en el MVP, pero si la tuviera se asignaría aquí.
+            _dateController.text = 'Registrado (${paciente.edad} años)'; 
             _isDataLoaded = true;
           }
 
@@ -129,16 +155,13 @@ class _FamiliaDashboardScreenState extends ConsumerState<FamiliaDashboardScreen>
 
   Future<void> _guardarPerfilML() async {
     final nombre = _nameController.text.trim();
-    final edadText = _ageController.text.replaceAll(RegExp(r'[^0-9]'), '');
-    final edad = int.tryParse(edadText) ?? 0;
-
-    if (nombre.isEmpty || edad == 0) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Por favor ingresa nombre y edad.')));
+    
+    if (nombre.isEmpty || _selectedDate == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Por favor ingresa el nombre y selecciona la fecha de nacimiento.')));
       return;
     }
 
-    final hoy = DateTime.now();
-    final fechaStr = "${hoy.year - edad}-${hoy.month.toString().padLeft(2, '0')}-${hoy.day.toString().padLeft(2, '0')}";
+    final fechaStr = _dateController.text;
 
     setState(() => _isSaving = true);
 
@@ -225,7 +248,32 @@ class _FamiliaDashboardScreenState extends ConsumerState<FamiliaDashboardScreen>
                 const SizedBox(height: 32),
                 _buildTextField('NOMBRE DEL PACIENTE', 'Ej: Mateo García', _nameController),
                 const SizedBox(height: 16),
-                _buildTextField('EDAD', 'Ej: 6 años', _ageController),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.only(left: 4, bottom: 4),
+                      child: Text('FECHA DE NACIMIENTO', style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.bold, color: const Color(0xFF1E1B16).withOpacity(0.5))),
+                    ),
+                    InkWell(
+                      onTap: () => _selectDate(context),
+                      child: IgnorePointer(
+                        child: TextFormField(
+                          controller: _dateController,
+                          style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.bold),
+                          decoration: InputDecoration(
+                            hintText: 'Seleccionar fecha',
+                            filled: true,
+                            fillColor: Colors.white,
+                            suffixIcon: const Icon(Icons.calendar_today, color: Color(0xFFA43714)),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                            contentPadding: const EdgeInsets.all(16),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ],
             ),
           ),

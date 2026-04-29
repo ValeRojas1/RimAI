@@ -7,7 +7,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 // ── Base URL ──────────────────────────────────────────────────────────────────
 // Dispositivo físico con USB: usa 'adb reverse tcp:8000 tcp:8000' y deja localhost
 // Emulador Android: cambia a 10.0.2.2
-const String _kBaseUrl = 'http://localhost:8000';
+const String _kBaseUrl = 'http://192.168.18.12:8000'; // <- Modificado a tu IP local
 
 // ── Helpers de parsing seguros ────────────────────────────────────────────────
 
@@ -208,6 +208,46 @@ class DashboardService {
         await _dio.get('/api/dashboard/paciente/$ninoId/plan');
     return PlanData.fromJson(response.data);
   }
+
+  Future<DashboardData> obtenerResumenFamilia() async {
+    try {
+      final response = await _dio.get('/api/dashboard/familia/resumen');
+      return DashboardData.fromJson(response.data);
+    } on DioException catch (e) {
+      if (e.type == DioExceptionType.connectionError ||
+          e.type == DioExceptionType.unknown) {
+        return DashboardData.mock();
+      }
+      rethrow;
+    }
+  }
+
+  Future<void> guardarPerfilNino(Map<String, dynamic> datos) async {
+    await _dio.post('/api/dashboard/familia/paciente', data: datos);
+  }
+
+  Future<void> vincularPaciente(Map<String, dynamic> datos) async {
+    try {
+      await _dio.post('/api/dashboard/terapeuta/vincular-paciente', data: datos);
+    } catch (e) {
+      if (e is DioException && e.response != null && (e.response?.statusCode == 404 || e.response?.statusCode == 409)) {
+        throw Exception(e.response?.data['detail'] ?? 'Error al vincular el paciente.');
+      }
+      rethrow;
+    }
+  }
+
+  Future<Map<String, dynamic>> generarPlanIA(String ninoId) async {
+    try {
+      final response = await _dio.post('/api/dashboard/paciente/$ninoId/plan/generar');
+      return response.data;
+    } catch (e) {
+      if (e is DioException && e.response != null) {
+        throw Exception(e.response?.data['detail'] ?? 'Error al generar plan con IA.');
+      }
+      rethrow;
+    }
+  }
 }
 
 // ── Providers ─────────────────────────────────────────────────────────────────
@@ -247,6 +287,10 @@ final dashboardServiceProvider = Provider<DashboardService>((ref) {
 
 final dashboardProvider = FutureProvider<DashboardData>((ref) async {
   return ref.read(dashboardServiceProvider).obtenerResumen();
+});
+
+final familiaDashboardProvider = FutureProvider<DashboardData>((ref) async {
+  return ref.read(dashboardServiceProvider).obtenerResumenFamilia();
 });
 
 final planActivoProvider =

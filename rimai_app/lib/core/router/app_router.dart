@@ -12,6 +12,10 @@ import 'package:rimai_app/adapters/input/screens/session/session_summary_screen.
 import 'package:rimai_app/adapters/input/screens/progress/progress_screen.dart';
 import 'package:rimai_app/adapters/input/screens/validation/clinical_validation_screen.dart';
 import 'package:rimai_app/adapters/input/screens/dashboard/dashboard_screen.dart';
+import 'package:rimai_app/adapters/input/screens/dashboard/familia_dashboard_screen.dart';
+import 'package:rimai_app/adapters/input/screens/dashboard/admin_dashboard_screen.dart';
+import 'package:rimai_app/adapters/input/screens/admin/create_therapist_screen.dart';
+import 'package:rimai_app/adapters/input/screens/dashboard/patient_admission_screen.dart';
 import 'package:rimai_app/core/providers/auth_providers.dart';
 
 /// Proveedor del enrutador principal de la aplicación, conectado al estado de Riverpod.
@@ -89,6 +93,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const IAAssistantScreen(),
       ),
       GoRoute(
+        path: '/terapeuta/admision',
+        builder: (context, state) => const PatientAdmissionScreen(),
+      ),
+      GoRoute(
         path: '/terapeuta/sesion',
         builder: (context, state) => const ActiveSessionScreen(sesionId: '1'),
       ),
@@ -138,11 +146,15 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       // ── Familia / Admin ────────────────────────────────────────────────────
       GoRoute(
         path: '/familia/dashboard',
-        builder: (context, state) => const _PlaceholderScreen(title: 'Panel Familiar'),
+        builder: (context, state) => const FamiliaDashboardScreen(),
       ),
       GoRoute(
         path: '/admin/dashboard',
-        builder: (context, state) => const _PlaceholderScreen(title: 'Panel Administrador'),
+        builder: (context, state) => const AdminDashboardScreen(),
+      ),
+      GoRoute(
+        path: '/admin/nuevo-terapeuta',
+        builder: (context, state) => const CreateTherapistScreen(),
       ),
       GoRoute(
         path: '/home',

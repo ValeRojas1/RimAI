@@ -7,6 +7,7 @@ import 'package:rimai_app/adapters/input/widgets/rimai_top_bar.dart';
 import 'package:rimai_app/adapters/input/widgets/rimai_bottom_nav.dart';
 import 'package:rimai_app/adapters/input/widgets/bento_card.dart';
 import 'package:rimai_app/core/providers/dashboard_providers.dart';
+import 'package:rimai_app/core/providers/auth_providers.dart';
 
 // ── Design Tokens (PMV1) ─────────────────────────────────────────────────────
 const _kPrimary    = Color(0xFFA43714); // naranja terracota
@@ -36,7 +37,16 @@ class DashboardScreen extends ConsumerWidget {
           children: [
             IconButton(
               icon: const Icon(Icons.notifications_outlined, color: _kSubtext),
+              tooltip: 'Notificaciones',
               onPressed: () {},
+            ),
+            IconButton(
+              icon: const Icon(Icons.logout, color: _kPrimary),
+              tooltip: 'Cerrar sesión',
+              onPressed: () async {
+                await ref.read(authStorageProvider).clearSession();
+                if (context.mounted) context.go('/auth/login');
+              },
             ),
             const CircleAvatar(
               radius: 20,
@@ -206,9 +216,9 @@ class DashboardScreen extends ConsumerWidget {
           onTap: () => context.go('/terapeuta/ia'),
         ),
         _QuickAccessButton(
-          label: 'Ver Progreso',
-          icon: Icons.insights,
-          onTap: () => context.go('/terapeuta/progreso'),
+          label: 'Vincular Paciente',
+          icon: Icons.person_add_alt_1,
+          onTap: () => context.go('/terapeuta/admision'),
         ),
         _QuickAccessButton(
           label: 'Nueva Sesión',

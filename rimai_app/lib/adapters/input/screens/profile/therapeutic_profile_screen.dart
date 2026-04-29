@@ -9,6 +9,7 @@ import 'package:rimai_app/adapters/input/widgets/bento_card.dart';
 import 'package:rimai_app/adapters/input/widgets/tag_chip.dart';
 import 'package:rimai_app/adapters/input/widgets/interest_card.dart';
 import 'package:rimai_app/core/providers/pmv2_providers.dart';
+import 'package:rimai_app/core/providers/dashboard_providers.dart';
 
 class TherapeuticProfileScreen extends ConsumerStatefulWidget {
   final String ninoId;
@@ -25,6 +26,7 @@ class _TherapeuticProfileScreenState extends ConsumerState<TherapeuticProfileScr
   Map<String, List<String>> _aversiveStimuli = {'RUIDO': [], 'COLORES': [], 'LUGARES': []};
   String? _uploadedFileName;
   bool _dataInitialized = false;
+  bool _isGeneratingPlan = false;
 
   @override
   void dispose() {
@@ -111,6 +113,8 @@ class _TherapeuticProfileScreenState extends ConsumerState<TherapeuticProfileScr
                   _buildHeader(),
                   const SizedBox(height: 32),
                   _buildBentoGrid(),
+                  const SizedBox(height: 32),
+                  _buildAIFeatureButton(),
                 ],
               ),
             ),
@@ -574,7 +578,135 @@ class _TherapeuticProfileScreenState extends ConsumerState<TherapeuticProfileScr
               ),
             )
         ],
-      )
+      ),
+    );
+  }
+
+  Widget _buildAIFeatureButton() {
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E1B16),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFFB8D6B2).withOpacity(0.3),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
+          )
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: _isGeneratingPlan ? null : _generarPlanIA,
+          borderRadius: BorderRadius.circular(16),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 24),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFB8D6B2).withOpacity(0.2),
+                    shape: BoxShape.circle,
+                  ),
+                  child: _isGeneratingPlan 
+                    ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Color(0xFFB8D6B2), strokeWidth: 2))
+                    : const Icon(Icons.auto_awesome, color: Color(0xFFB8D6B2), size: 24),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _isGeneratingPlan ? "Analizando con IA..." : "Generar Plan Terapéutico (IA)",
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        "Predicción de dificultad mediante Random Forest",
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.7),
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Icon(Icons.arrow_forward_ios, color: Colors.white54, size: 16),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _generarPlanIA() async {
+    setState(() => _isGeneratingPlan = true);
+    try {
+      final result = await ref.read(dashboardServiceProvider).generarPlanIA(widget.ninoId);
+      if (mounted) {
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            backgroundColor: const Color(0xFFFAF2E9),
+            title: Row(
+              children: const [
+                Icon(Icons.auto_awesome, color: Color(0xFFA43714)),
+                SizedBox(width: 8),
+                Text("Plan Generado", style: TextStyle(color: Color(0xFF1E1B16), fontWeight: FontWeight.bold)),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(result['mensaje'] ?? 'Plan generado exitosamente.', style: const TextStyle(color: Color(0xFF58423B))),
+                const SizedBox(height: 16),
+                _buildInfoRow("Dificultad:", result['dificultad_inicial'] ?? 'N/A'),
+                const SizedBox(height: 8),
+                _buildInfoRow("Confianza IA:", "${((result['confianza_ia'] ?? 0) * 100).toStringAsFixed(1)}%"),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => context.pop(),
+                child: const Text("Cerrar", style: TextStyle(color: Color(0xFFA43714), fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
+      }
+    } finally {
+      if (mounted) setState(() => _isGeneratingPlan = false);
+    }
+  }
+
+  Widget _buildInfoRow(String label, String value) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(label, style: TextStyle(fontWeight: FontWeight.bold, color: const Color(0xFF58423B).withOpacity(0.7))),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          decoration: BoxDecoration(
+            color: const Color(0xFFB8D6B2),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Text(value, style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF1E1B16))),
+        ),
+      ],
     );
   }
 }
