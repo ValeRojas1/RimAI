@@ -225,6 +225,29 @@ class DashboardService {
   Future<void> guardarPerfilNino(Map<String, dynamic> datos) async {
     await _dio.post('/api/dashboard/familia/paciente', data: datos);
   }
+
+  Future<void> vincularPaciente(Map<String, dynamic> datos) async {
+    try {
+      await _dio.post('/api/dashboard/terapeuta/vincular-paciente', data: datos);
+    } catch (e) {
+      if (e is DioException && e.response != null && (e.response?.statusCode == 404 || e.response?.statusCode == 409)) {
+        throw Exception(e.response?.data['detail'] ?? 'Error al vincular el paciente.');
+      }
+      rethrow;
+    }
+  }
+
+  Future<Map<String, dynamic>> generarPlanIA(String ninoId) async {
+    try {
+      final response = await _dio.post('/api/dashboard/paciente/$ninoId/plan/generar');
+      return response.data;
+    } catch (e) {
+      if (e is DioException && e.response != null) {
+        throw Exception(e.response?.data['detail'] ?? 'Error al generar plan con IA.');
+      }
+      rethrow;
+    }
+  }
 }
 
 // ── Providers ─────────────────────────────────────────────────────────────────

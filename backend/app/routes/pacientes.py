@@ -274,3 +274,158 @@ def get_plan_activo(
         activo=plan.activo,
         actividades=actividades,
     )
+
+from app.ai.motor import motor_adaptativo
+from pydantic import BaseModel
+
+class GenerarPlanResponse(BaseModel):
+    plan_id: str
+    dificultad_inicial: str
+    confianza_ia: float
+    mensaje: str
+
+@router.post("/paciente/{nino_id}/plan/generar", response_model=GenerarPlanResponse)
+def generar_plan_terapeutico(
+    nino_id: str,
+    current_user: Usuario = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Genera un nuevo plan terapéutico utilizando IA (Random Forest) para estimar la dificultad.
+    """
+    nino = db.query(Nino).filter(Nino.id == nino_id).first()
+    if not nino:
+        raise HTTPException(status_code=404, detail="Paciente no encontrado")
+        
+    if nino.terapeuta_id is None:
+        raise HTTPException(status_code=400, detail="El paciente no tiene un terapeuta asignado")
+        
+    # Desactivar planes anteriores
+    planes_viejos = db.query(PlanTerapeutico).filter(
+        PlanTerapeutico.nino_id == nino.id, 
+        PlanTerapeutico.activo == True
+    ).all()
+    for p in planes_viejos:
+        p.activo = False
+        
+    # Preparar datos para IA
+    nino_data = {
+        'fecha_nacimiento': nino.fecha_nacimiento,
+        'nivel_cognitivo': nino.nivel_cognitivo.value if nino.nivel_cognitivo else 'Medio',
+        'perfil_sensorial': nino.perfil_sensorial or {},
+        'objetivos_intervencion': nino.objetivos_intervencion or []
+    }
+    
+    import time
+    start_time = time.time()
+    
+    # Inferencia IA
+    dificultad, confianza = motor_adaptativo.predecir_dificultad(nino_data)
+    
+    # El Criterio 2 exige < 100ms. Imprimimos para debug
+    elapsed = (time.time() - start_time) * 1000
+    print(f"IA Inference Time: {elapsed:.2f} ms")
+    
+    from app.models import NivelDificultad
+    
+    # Mapeo de string a Enum
+    map_enum = {
+        'Básico': NivelDificultad.Bajo,
+        'Intermedio': NivelDificultad.Medio,
+        'Avanzado': NivelDificultad.Alto
+    }
+    
+    dificultad_enum = map_enum.get(dificultad, NivelDificultad.Medio)
+    
+    # Crear nuevo plan
+    nuevo_plan = PlanTerapeutico(
+        nino_id=nino.id,
+        terapeuta_id=nino.terapeuta_id,
+        fecha_inicio=date.today(),
+        nivel_dificultad_actual=dificultad_enum,
+        activo=True
+    )
+    db.add(nuevo_plan)
+    db.flush() # Para obtener el ID
+    
+    # Seleccionar actividades sugeridas (Trazabilidad)
+    # Buscamos actividades que coincidan con la dificultad
+    actividades = db.query(Actividad).filter(Actividad.nivel_dificultad == dificultad_enum).limit(3).all()
+    
+    # Si no hay actividades en DB (por estar vacía), no rompemos
+    if actividades:
+        # Aquí crearíamos la relación en plan_actividades
+        # Por ahora, usamos SQL crudo ya que SQLAlchemy no mapeó plan_actividades directamente como entidad
+        from sqlalchemy import text
+        for i, act in enumerate(actividades):
+            db.execute(
+                text("INSERT INTO plan_actividades (plan_id, actividad_id, orden) VALUES (:pid, :aid, :ord)"),
+                {"pid": str(nuevo_plan.id), "aid": str(act.id), "ord": i+1}
+            )
+            
+    db.commit()
+    
+    return GenerarPlanResponse(
+        plan_id=str(nuevo_plan.id),
+        dificultad_inicial=dificultad,
+        confianza_ia=confianza,
+        mensaje="Plan generado exitosamente con IA"
+    )
+
+from app.schemas import VincularPacienteRequest
+
+@router.post("/terapeuta/vincular-paciente")
+def vincular_paciente(
+    data: VincularPacienteRequest,
+    current_user: Usuario = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if current_user.rol.value != "terapeuta":
+        raise HTTPException(status_code=403, detail="Solo terapeutas pueden vincular pacientes")
+        
+    terapeuta = db.query(Terapeuta).filter(Terapeuta.usuario_id == current_user.id).first()
+    if not terapeuta:
+        raise HTTPException(status_code=404, detail="Perfil de terapeuta no encontrado")
+        
+    # Buscar primero solo por nombre para dar mejor feedback
+    nino_por_nombre = db.query(Nino).filter(
+        func.lower(func.trim(Nino.nombre)) == data.nombre.strip().lower()
+    ).first()
+
+    if not nino_por_nombre:
+        raise HTTPException(
+            status_code=404, 
+            detail=f"No existe ningún paciente llamado '{data.nombre}' registrado por un familiar."
+        )
+
+    # Ahora verificar si la fecha coincide
+    nino = db.query(Nino).filter(
+        func.lower(func.trim(Nino.nombre)) == data.nombre.strip().lower(),
+        Nino.fecha_nacimiento == data.fecha_nacimiento
+    ).first()
+    
+    if not nino:
+        raise HTTPException(
+            status_code=404, 
+            detail=f"El paciente '{data.nombre}' existe, pero la fecha de nacimiento no coincide (Registrada: {nino_por_nombre.fecha_nacimiento})."
+        )
+        
+    if nino.terapeuta_id is not None and nino.terapeuta_id != terapeuta.id:
+        raise HTTPException(
+            status_code=409,
+            detail="El paciente ya está asignado a otro terapeuta."
+        )
+        
+    # Enriquecer perfil y vincular
+    from app.models import NivelCognitivo
+    nino.terapeuta_id = terapeuta.id
+    nino.nivel_cognitivo = NivelCognitivo(data.nivel_cognitivo)
+    nino.objetivos_intervencion = data.objetivos_intervencion
+    
+    # Combinar o sobreescribir el perfil sensorial (el terapeuta tiene la última palabra clínica)
+    # Por ahora simplemente guardamos el que manda el terapeuta
+    nino.perfil_sensorial = data.perfil_sensorial
+    
+    db.commit()
+    
+    return {"status": "ok", "message": "Paciente vinculado y actualizado exitosamente"}
