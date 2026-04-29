@@ -29,7 +29,8 @@ final authRepositoryProvider = Provider<AuthRepositoryPort>((ref) {
 /// Proveedor del caso de uso de registro (adaptador de entrada).
 final registrarUsuarioUseCaseProvider = Provider<RegistrarUsuarioPort>((ref) {
   final repo = ref.watch(authRepositoryProvider);
-  return RegistrarUsuarioUseCase(repo);
+  final storage = ref.watch(authStorageProvider);
+  return RegistrarUsuarioUseCase(repo, storage);
 });
 
 /// Proveedor del caso de uso de Iniciar Sesión.
