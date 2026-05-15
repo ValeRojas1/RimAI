@@ -39,3 +39,6 @@ flutter pub get
 | PostgreSQL | localhost:5432 | las de tu .env |
 
 ## Estructura del proyecto
+
+## Descarga Nuestra APP
+- https://github.com/ValeRojas1/RimAI/releases/tag/v1
