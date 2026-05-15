@@ -51,7 +51,8 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
     if (text.trim().isEmpty) {
       return 'El correo electrónico es requerido';
     }
-    final emailRegex = RegExp(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$');
+    final emailRegex =
+        RegExp(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$');
     if (!emailRegex.hasMatch(text.trim())) {
       return 'Ingresa un correo electrónico válido';
     }
@@ -82,7 +83,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
 
     try {
       final registerUseCase = ref.read(registrarUsuarioUseCaseProvider);
-      
+
       final request = RegistroUsuarioRequest(
         nombreCompleto: _nombreController.text.trim(),
         correo: _correoController.text.trim(),
@@ -109,11 +110,13 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
       } else {
         context.go('/familia/dashboard');
       }
-      
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _errorMessage = e.toString().replaceFirst('Exception: ', '').replaceFirst('ArgumentError: ', '');
+        _errorMessage = e
+            .toString()
+            .replaceFirst('Exception: ', '')
+            .replaceFirst('ArgumentError: ', '');
       });
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -130,7 +133,6 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             RimAIErrorBanner(message: _errorMessage),
-            
             FormField<String>(
               validator: _validateNombre,
               autovalidateMode: AutovalidateMode.onUserInteraction,
@@ -146,7 +148,6 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
               ),
             ),
             const SizedBox(height: 24),
-            
             FormField<String>(
               validator: _validateCorreo,
               autovalidateMode: AutovalidateMode.onUserInteraction,
@@ -162,7 +163,6 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
               ),
             ),
             const SizedBox(height: 24),
-            
             FormField<String>(
               validator: _validateContrasena,
               autovalidateMode: AutovalidateMode.onUserInteraction,
@@ -178,7 +178,6 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                 onChanged: (val) => state.didChange(val),
               ),
             ),
-            
             const SizedBox(height: 32),
             _buildRegisterButton(),
             const SizedBox(height: 20),
@@ -215,7 +214,8 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
         iconAlignment: IconAlignment.end,
         style: ElevatedButton.styleFrom(
           backgroundColor: const Color(0xFFB8D6B2),
-          disabledBackgroundColor: const Color(0xFFB8D6B2).withValues(alpha: 0.6),
+          disabledBackgroundColor:
+              const Color(0xFFB8D6B2).withValues(alpha: 0.6),
           elevation: 0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(9999),
@@ -225,7 +225,8 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
             if (states.contains(WidgetState.hovered)) return 8;
             return 4;
           }),
-          shadowColor: WidgetStateProperty.all(const Color(0xFFB8D6B2).withValues(alpha: 0.3)),
+          shadowColor: WidgetStateProperty.all(
+              const Color(0xFFB8D6B2).withValues(alpha: 0.3)),
         ),
       ),
     );

@@ -30,6 +30,7 @@ class RegistrarUsuarioUseCase implements RegistrarUsuarioPort {
       token: usuario.token ?? '',
       role: usuario.rol ?? '',
       userId: usuario.id ?? '',
+      userName: usuario.nombreCompleto,
     );
 
     return usuario;

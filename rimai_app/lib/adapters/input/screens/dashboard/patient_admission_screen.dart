@@ -1,465 +1,482 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
-
 import 'package:rimai_app/core/providers/dashboard_providers.dart';
 
+// ── Design tokens ─────────────────────────────────────────────────────────────
+const _kP = Color(0xFFA43714);
+const _kA = Color(0xFFB8D6B2);
+const _kBg = Color(0xFFFFF8F2);
+const _kSurf = Color(0xFFFAF2E9);
+const _kText = Color(0xFF1E1B16);
+const _kSub = Color(0xFF58423B);
+const _kBdr = Color(0xFFDFC0B7);
+
+/// Pantalla de admisión / enriquecimiento clínico.
+///
+/// Modo A — Enriquecimiento ([ninoId] != null):
+///   El terapeuta ya vinculó al niño desde la bandeja de espera.
+///   Aquí completa el perfil clínico (nivel cognitivo, objetivos, sensorial).
+///
+/// Modo B — Búsqueda ([ninoId] == null):
+///   Flujo de búsqueda por nombre+fecha (fallback legacy).
 class PatientAdmissionScreen extends ConsumerStatefulWidget {
-  const PatientAdmissionScreen({Key? key}) : super(key: key);
+  final String? ninoId;
+  const PatientAdmissionScreen({Key? key, this.ninoId}) : super(key: key);
 
   @override
-  ConsumerState<PatientAdmissionScreen> createState() => _PatientAdmissionScreenState();
+  ConsumerState<PatientAdmissionScreen> createState() =>
+      _PatientAdmissionScreenState();
 }
 
-class _PatientAdmissionScreenState extends ConsumerState<PatientAdmissionScreen> with SingleTickerProviderStateMixin {
-  final _nameController = TextEditingController();
-  final _dateController = TextEditingController();
+class _PatientAdmissionScreenState
+    extends ConsumerState<PatientAdmissionScreen>
+    with SingleTickerProviderStateMixin {
+  // ── Modo B: búsqueda ───────────────────────────────────────────────────────
+  final _nameCtrl = TextEditingController();
+  final _dateCtrl = TextEditingController();
   DateTime? _selectedDate;
-  late TabController _tabController;
-  bool _isSaving = false;
+  late TabController _tabCtrl;
 
-  // Datos Clínicos
+  // ── Compartido: datos clínicos ─────────────────────────────────────────────
   String _nivelCognitivo = 'Medio';
   final List<String> _objetivos = [];
-  final _objetivoController = TextEditingController();
+  final _objCtrl = TextEditingController();
+  final Set<String> _hiper = {};
+  final Set<String> _hipo = {};
+  final Set<String> _rep = {};
+  final Set<String> _int = {};
+  final _obsCtrl = TextEditingController();
 
-  // Perfil Sensorial (IA)
-  final Set<String> _hipersensibilidad = {};
-  final Set<String> _hiposensibilidad = {};
-  final Set<String> _comportamientosRepetitivos = {};
-  final Set<String> _interesesObsesivos = {};
+  bool _saving = false;
+
+  bool get _enrichMode => widget.ninoId != null;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabCtrl = TabController(length: 2, vsync: this);
   }
 
   @override
   void dispose() {
-    _nameController.dispose();
-    _dateController.dispose();
-    _tabController.dispose();
-    _objetivoController.dispose();
+    _nameCtrl.dispose();
+    _dateCtrl.dispose();
+    _tabCtrl.dispose();
+    _objCtrl.dispose();
+    _obsCtrl.dispose();
     super.dispose();
   }
 
-  Future<void> _selectDate(BuildContext context) async {
-    final DateTime? picked = await showDatePicker(
+  void _tog(Set<String> s, String v) =>
+      setState(() => s.contains(v) ? s.remove(v) : s.add(v));
+
+  // ── Guardar perfil clínico (Modo A) ───────────────────────────────────────
+  Future<void> _guardarPerfil() async {
+    if (_objetivos.isEmpty) {
+      _snack('Agrega al menos un objetivo de intervención.');
+      return;
+    }
+    setState(() => _saving = true);
+    try {
+      final result = await ref
+          .read(dashboardServiceProvider)
+          .completarPerfilClinico(widget.ninoId!, {
+        'nivel_cognitivo': _nivelCognitivo,
+        'objetivos_intervencion': _objetivos,
+        'perfil_sensorial': {
+          'hipersensibilidad': _hiper.toList(),
+          'hiposensibilidad': _hipo.toList(),
+          'comportamientos_repetitivos': _rep.toList(),
+          'intereses_obsesivos': _int.toList(),
+        },
+        if (_obsCtrl.text.trim().isNotEmpty)
+          'observaciones_clinicas': _obsCtrl.text.trim(),
+      });
+
+      ref.invalidate(dashboardProvider);
+      ref.invalidate(pendientesProvider);
+
+      final estado = result['estado_clinico'] as String? ?? '';
+      final msg = estado == 'listo_para_plan'
+          ? '✅ Perfil completo. Paciente listo para generar plan.'
+          : '💾 Perfil guardado. ${result['mensaje'] ?? ''}';
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(msg),
+            backgroundColor: estado == 'listo_para_plan'
+                ? const Color(0xFF4A624D)
+                : const Color(0xFF5C4A00),
+            duration: const Duration(seconds: 4),
+          ),
+        );
+        context.go('/terapeuta/nino/${widget.ninoId}');
+      }
+    } catch (e) {
+      _snack('$e', isError: true);
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  // ── Vincular por nombre+fecha (Modo B — legacy) ────────────────────────────
+  Future<void> _vincularLegacy() async {
+    if (_nameCtrl.text.trim().isEmpty || _selectedDate == null) {
+      _snack('Nombre y fecha son obligatorios.');
+      return;
+    }
+    setState(() => _saving = true);
+    try {
+      await ref.read(dashboardServiceProvider).vincularPaciente({
+        'nombre': _nameCtrl.text.trim(),
+        'fecha_nacimiento': _dateCtrl.text,
+        'nivel_cognitivo': _nivelCognitivo,
+        'objetivos_intervencion': _objetivos,
+        'perfil_sensorial': {
+          'hipersensibilidad': _hiper.toList(),
+          'hiposensibilidad': _hipo.toList(),
+          'comportamientos_repetitivos': _rep.toList(),
+          'intereses_obsesivos': _int.toList(),
+        },
+      });
+      ref.invalidate(dashboardProvider);
+      if (mounted) {
+        _snack('✓ Paciente vinculado exitosamente.');
+        context.go('/terapeuta/dashboard');
+      }
+    } catch (e) {
+      _snack('$e', isError: true);
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _pickDate() async {
+    final p = await showDatePicker(
       context: context,
       initialDate: _selectedDate ?? DateTime.now().subtract(const Duration(days: 365 * 6)),
       firstDate: DateTime(2000),
       lastDate: DateTime.now(),
-      builder: (context, child) {
-        return Theme(
-          data: Theme.of(context).copyWith(
-            colorScheme: const ColorScheme.light(
-              primary: Color(0xFFA43714),
-              onPrimary: Colors.white,
-              onSurface: Color(0xFF1E1B16),
-            ),
-          ),
-          child: child!,
-        );
-      },
+      builder: (ctx, child) => Theme(
+        data: Theme.of(ctx).copyWith(
+          colorScheme: const ColorScheme.light(primary: _kP, onPrimary: Colors.white, onSurface: _kText),
+        ),
+        child: child!,
+      ),
     );
-    if (picked != null && picked != _selectedDate) {
+    if (p != null) {
       setState(() {
-        _selectedDate = picked;
-        _dateController.text = "${picked.year}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}";
+        _selectedDate = p;
+        _dateCtrl.text = '${p.year}-${p.month.toString().padLeft(2, '0')}-${p.day.toString().padLeft(2, '0')}';
       });
     }
   }
 
-  void _addObjetivo() {
-    if (_objetivoController.text.trim().isNotEmpty) {
-      setState(() {
-        _objetivos.add(_objetivoController.text.trim());
-        _objetivoController.clear();
-      });
-    }
+  void _snack(String msg, {bool isError = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg),
+      backgroundColor: isError ? Colors.red.shade800 : const Color(0xFF4A624D),
+    ));
   }
 
-  void _removeObjetivo(String obj) {
-    setState(() => _objetivos.remove(obj));
-  }
-
-  void _toggleSet(Set<String> set, String item) {
-    setState(() {
-      if (set.contains(item)) set.remove(item);
-      else set.add(item);
-    });
-  }
-
-  Future<void> _vincularPaciente() async {
-    final nombre = _nameController.text.trim();
-    if (nombre.isEmpty || _selectedDate == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Por favor ingresa el nombre exacto y la fecha de nacimiento para buscar.')));
-      return;
-    }
-
-    if (_objetivos.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Por favor agrega al menos un objetivo de intervención.')));
-      return;
-    }
-
-    setState(() => _isSaving = true);
-
-    try {
-      final datos = {
-        "nombre": nombre,
-        "fecha_nacimiento": _dateController.text,
-        "nivel_cognitivo": _nivelCognitivo,
-        "objetivos_intervencion": _objetivos,
-        "perfil_sensorial": {
-          "hipersensibilidad": _hipersensibilidad.toList(),
-          "hiposensibilidad": _hiposensibilidad.toList(),
-          "comportamientos_repetitivos": _comportamientosRepetitivos.toList(),
-          "intereses_obsesivos": _interesesObsesivos.toList(),
-        }
-      };
-
-      await ref.read(dashboardServiceProvider).vincularPaciente(datos);
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Paciente vinculado y enriquecido exitosamente.'), backgroundColor: Color(0xFF4A624D)),
-        );
-        ref.invalidate(dashboardProvider);
-        context.go('/terapeuta/dashboard');
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(e.toString().replaceAll('Exception: ', '')), 
-          backgroundColor: Colors.red.shade800,
-          duration: const Duration(seconds: 5),
-        ));
-      }
-    } finally {
-      if (mounted) setState(() => _isSaving = false);
-    }
-  }
-
+  // ── Build ──────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
+    return _enrichMode ? _buildEnrichMode() : _buildSearchMode();
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // MODO A — ENRIQUECIMIENTO CLÍNICO
+  // ══════════════════════════════════════════════════════════════════════════
+  Widget _buildEnrichMode() {
     return Scaffold(
-      backgroundColor: const Color(0xFFFFF8F2),
-      extendBodyBehindAppBar: true,
+      backgroundColor: _kBg,
       appBar: AppBar(
-        backgroundColor: Colors.transparent,
+        backgroundColor: _kBg,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new, color: Color(0xFF1E1B16)),
+          icon: const Icon(Icons.arrow_back_ios_new, color: _kText, size: 18),
+          onPressed: () => context.go('/terapeuta/pendientes'),
+        ),
+        title: Text('Perfil clínico',
+            style: GoogleFonts.plusJakartaSans(color: _kText, fontWeight: FontWeight.bold, fontSize: 17)),
+      ),
+      body: SafeArea(
+        child: Column(children: [
+          // Info banner
+          Container(
+            margin: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: _kA.withOpacity(0.2),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: Row(children: [
+              const Icon(Icons.link_rounded, color: Color(0xFF4A624D), size: 18),
+              const SizedBox(width: 10),
+              Expanded(child: Text(
+                'Paciente vinculado. Completa el perfil clínico para generar el plan.',
+                style: GoogleFonts.plusJakartaSans(fontSize: 12, color: _kText),
+              )),
+            ]),
+          ),
+          const SizedBox(height: 8),
+          Expanded(child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+            child: Column(children: [
+              _clinicalCard(),
+              const SizedBox(height: 16),
+              _sensorialCard(),
+              const SizedBox(height: 16),
+              _obsCard(),
+            ]),
+          )),
+          // Bottom save button
+          _saveBar(onPressed: _guardarPerfil, label: 'Guardar perfil clínico'),
+        ]),
+      ),
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // MODO B — BÚSQUEDA (legacy)
+  // ══════════════════════════════════════════════════════════════════════════
+  Widget _buildSearchMode() {
+    return Scaffold(
+      backgroundColor: _kBg,
+      appBar: AppBar(
+        backgroundColor: _kBg,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new, color: _kText, size: 18),
           onPressed: () => context.go('/terapeuta/dashboard'),
         ),
-      ),
-      body: Stack(
-        children: [
-          CustomScrollView(
-            slivers: [
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: EdgeInsets.only(top: 80 + MediaQuery.of(context).padding.top, left: 24, right: 24, bottom: 16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Admisión Clínica', style: GoogleFonts.plusJakartaSans(fontSize: 32, fontWeight: FontWeight.w800, letterSpacing: -1, color: const Color(0xFF1E1B16))),
-                      const SizedBox(height: 8),
-                      Text('Encuentra el expediente creado por el familiar y añade tus parámetros clínicos.', style: GoogleFonts.plusJakartaSans(fontSize: 16, color: const Color(0xFF58423B).withOpacity(0.8))),
-                      const SizedBox(height: 24),
-                      _buildTabBar(),
-                    ],
-                  ),
-                ),
-              ),
-              SliverFillRemaining(
-                child: TabBarView(
-                  controller: _tabController,
-                  children: [
-                    _buildBusquedaTab(),
-                    _buildClinicoTab(),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          Positioned(
-            bottom: 24, left: 24, right: 24,
-            child: ElevatedButton.icon(
-              onPressed: _isSaving ? null : _vincularPaciente,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFA43714),
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                elevation: 4,
-              ),
-              icon: _isSaving 
-                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                : const Icon(Icons.person_add_alt_1),
-              label: Text(
-                _isSaving ? 'Buscando y Vinculando...' : 'Vincular Paciente',
-                style: GoogleFonts.plusJakartaSans(fontSize: 16, fontWeight: FontWeight.bold),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTabBar() {
-    return Container(
-      decoration: BoxDecoration(
-        color: const Color(0xFFF5EDE4),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      padding: const EdgeInsets.all(4),
-      child: TabBar(
-        controller: _tabController,
-        indicator: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 4, offset: const Offset(0, 2))],
-        ),
-        labelColor: const Color(0xFFA43714),
-        unselectedLabelColor: const Color(0xFF58423B).withOpacity(0.6),
-        labelStyle: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.bold, fontSize: 13),
-        tabs: const [
-          Tab(text: "1. Búsqueda"),
-          Tab(text: "2. Clínica IA"),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildBusquedaTab() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.only(left: 24, right: 24, top: 16, bottom: 100),
-      child: Container(
-        padding: const EdgeInsets.all(24),
-        decoration: BoxDecoration(color: const Color(0xFFFAF2E9), borderRadius: BorderRadius.circular(24)),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                const Icon(Icons.search, color: Color(0xFFA43714), size: 32),
-                const SizedBox(width: 12),
-                Expanded(child: Text('Identificación Exacta', style: GoogleFonts.plusJakartaSans(fontSize: 20, fontWeight: FontWeight.bold, color: const Color(0xFF1E1B16)))),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(color: const Color(0xFFFDE8E8), borderRadius: BorderRadius.circular(12)),
-              child: Row(
-                children: [
-                  const Icon(Icons.info_outline, color: Color(0xFFA43714), size: 20),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text('El niño debe estar previamente registrado por un familiar en la aplicación.', style: GoogleFonts.plusJakartaSans(fontSize: 12, color: const Color(0xFF58423B))),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 24),
-            _buildTextField('NOMBRE EXACTO DEL PACIENTE', 'Ej: Mateo García', _nameController),
-            const SizedBox(height: 16),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.only(left: 4, bottom: 4),
-                  child: Text('FECHA DE NACIMIENTO', style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.bold, color: const Color(0xFF1E1B16).withOpacity(0.5))),
-                ),
-                InkWell(
-                  onTap: () => _selectDate(context),
-                  child: IgnorePointer(
-                    child: TextFormField(
-                      controller: _dateController,
-                      style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.bold),
-                      decoration: InputDecoration(
-                        hintText: 'Seleccionar fecha',
-                        filled: true,
-                        fillColor: Colors.white,
-                        suffixIcon: const Icon(Icons.calendar_today, color: Color(0xFFA43714)),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-                        contentPadding: const EdgeInsets.all(16),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
+        title: Text('Vincular paciente',
+            style: GoogleFonts.plusJakartaSans(color: _kText, fontWeight: FontWeight.bold, fontSize: 17)),
+        bottom: TabBar(
+          controller: _tabCtrl,
+          labelColor: _kP,
+          unselectedLabelColor: _kSub,
+          indicatorColor: _kP,
+          tabs: const [Tab(text: 'Búsqueda'), Tab(text: 'Perfil clínico')],
         ),
       ),
-    );
-  }
-
-  Widget _buildClinicoTab() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.only(left: 24, right: 24, top: 16, bottom: 100),
-      child: Column(
-        children: [
-          // Nivel Cognitivo y Objetivos
-          Container(
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(color: const Color(0xFFE5DCC4).withOpacity(0.3), borderRadius: BorderRadius.circular(24)),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Parámetros de Intervención', style: GoogleFonts.plusJakartaSans(fontSize: 18, fontWeight: FontWeight.bold, color: const Color(0xFF1E1B16))),
-                const SizedBox(height: 24),
-                _buildSingleChoiceSection('NIVEL COGNITIVO', ['Bajo', 'Medio', 'Alto'], _nivelCognitivo, (v) => setState(() => _nivelCognitivo = v)),
-                const SizedBox(height: 24),
-                Text('OBJETIVOS DE TERAPIA', style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.bold, color: const Color(0xFF58423B).withOpacity(0.6))),
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: _objetivos.map((obj) => Chip(
-                    label: Text(obj, style: const TextStyle(fontWeight: FontWeight.bold)),
-                    backgroundColor: Colors.white,
-                    deleteIcon: const Icon(Icons.close, size: 16),
-                    onDeleted: () => _removeObjetivo(obj),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999), side: const BorderSide(color: Color(0xFFDFC0B7))),
-                  )).toList(),
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _objetivoController,
-                        decoration: InputDecoration(
-                          hintText: 'Añadir objetivo...',
-                          filled: true,
-                          fillColor: Colors.white,
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                        ),
-                        onSubmitted: (_) => _addObjetivo(),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    IconButton(
-                      onPressed: _addObjetivo,
-                      icon: const Icon(Icons.add_circle, color: Color(0xFFA43714), size: 36),
-                    )
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-          // Perfil Sensorial (IA)
-          Container(
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(color: const Color(0xFFF5EDE4), borderRadius: BorderRadius.circular(24)),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    const Icon(Icons.visibility, color: Color(0xFFA43714), size: 32),
-                    const SizedBox(width: 12),
-                    Expanded(child: Text('Perfil Sensorial Clínico (Ajuste IA)', style: GoogleFonts.plusJakartaSans(fontSize: 18, fontWeight: FontWeight.bold, color: const Color(0xFF1E1B16)))),
-                  ],
-                ),
-                const SizedBox(height: 24),
-                _buildMultiChoiceSection('HIPERSENSIBILIDAD (EVITA)', ['Ruidos fuertes', 'Texturas ásperas', 'Luces brillantes', 'Multitudes', 'Etiquetas'], _hipersensibilidad),
-                const SizedBox(height: 24),
-                _buildMultiChoiceSection('HIPOSENSIBILIDAD (BUSCA)', ['Dolor', 'Movimiento constante', 'Presión profunda', 'Morder objetos'], _hiposensibilidad),
-                const SizedBox(height: 24),
-                _buildMultiChoiceSection('COMPORTAMIENTOS REPETITIVOS', ['Aleteo de manos', 'Balanceo', 'Ecolalia', 'Alinear juguetes', 'Caminar de puntillas'], _comportamientosRepetitivos),
-                const SizedBox(height: 24),
-                _buildMultiChoiceSection('INTERESES OBSESIVOS', ['Dinosaurios', 'Trenes', 'Espacio', 'Geometría', 'Números', 'Ninguno'], _interesesObsesivos),
-              ],
-            ),
-          ),
-        ],
+      body: TabBarView(
+        controller: _tabCtrl,
+        children: [_searchTab(), _clinicalTab()],
       ),
     );
   }
 
-  Widget _buildSingleChoiceSection(String title, List<String> options, String currentValue, ValueChanged<String> onChanged) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(title, style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.bold, color: const Color(0xFF58423B).withOpacity(0.6))),
-        const SizedBox(height: 12),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: options.map((opt) {
-            final isSelected = opt == currentValue;
-            return ChoiceChip(
-              label: Text(opt),
-              selected: isSelected,
-              onSelected: (val) { if (val) onChanged(opt); },
-              selectedColor: const Color(0xFFB8D6B2),
-              backgroundColor: Colors.white,
-              labelStyle: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.bold, color: isSelected ? const Color(0xFF1E1B16) : const Color(0xFF58423B)),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999), side: const BorderSide(color: Colors.transparent)),
-            );
-          }).toList(),
+  Widget _searchTab() => SingleChildScrollView(
+    padding: const EdgeInsets.all(20),
+    child: Column(children: [
+      _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        _label('NOMBRE DEL PACIENTE'),
+        _field('Nombre completo', _nameCtrl),
+        const SizedBox(height: 16),
+        _label('FECHA DE NACIMIENTO'),
+        InkWell(
+          onTap: _pickDate,
+          child: IgnorePointer(child: TextFormField(
+            controller: _dateCtrl,
+            decoration: _dec('Seleccionar fecha', icon: Icons.calendar_today),
+          )),
         ),
-      ],
-    );
+      ])),
+      const SizedBox(height: 24),
+      SizedBox(width: double.infinity, child: ElevatedButton(
+        onPressed: () => _tabCtrl.animateTo(1),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: _kA, foregroundColor: _kText,
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          elevation: 0,
+        ),
+        child: Text('Continuar con perfil clínico →',
+            style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.bold)),
+      )),
+    ]),
+  );
+
+  Widget _clinicalTab() => Column(children: [
+    Expanded(child: SingleChildScrollView(
+      padding: const EdgeInsets.all(20),
+      child: Column(children: [
+        _clinicalCard(),
+        const SizedBox(height: 16),
+        _sensorialCard(),
+        const SizedBox(height: 16),
+        _obsCard(),
+      ]),
+    )),
+    _saveBar(onPressed: _vincularLegacy, label: 'Vincular paciente'),
+  ]);
+
+  // ── Secciones del formulario clínico ─────────────────────────────────────
+  Widget _clinicalCard() => _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    Text('Datos clínicos', style: GoogleFonts.plusJakartaSans(
+        fontSize: 15, fontWeight: FontWeight.bold, color: _kText)),
+    const SizedBox(height: 16),
+    _label('NIVEL COGNITIVO'),
+    Row(children: ['Bajo', 'Medio', 'Alto'].map((v) {
+      final sel = v == _nivelCognitivo;
+      return Padding(
+        padding: const EdgeInsets.only(right: 10),
+        child: ChoiceChip(
+          label: Text(v),
+          selected: sel,
+          onSelected: (_) => setState(() => _nivelCognitivo = v),
+          selectedColor: _kA,
+          backgroundColor: Colors.white,
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(999),
+              side: BorderSide(color: sel ? _kA : _kBdr)),
+          labelStyle: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600, fontSize: 13, color: _kText),
+        ),
+      );
+    }).toList()),
+    const SizedBox(height: 20),
+    _label('OBJETIVOS DE INTERVENCIÓN'),
+    Row(children: [
+      Expanded(child: TextFormField(
+        controller: _objCtrl,
+        decoration: _dec('Agregar objetivo...'),
+        style: GoogleFonts.plusJakartaSans(fontSize: 13),
+        onFieldSubmitted: (_) => _addObjetivo(),
+      )),
+      const SizedBox(width: 8),
+      IconButton(
+        onPressed: _addObjetivo,
+        icon: const Icon(Icons.add_circle_rounded, color: _kP),
+      ),
+    ]),
+    if (_objetivos.isNotEmpty) ...[
+      const SizedBox(height: 10),
+      Wrap(spacing: 8, runSpacing: 6, children: _objetivos.map((o) => Chip(
+        label: Text(o, style: GoogleFonts.plusJakartaSans(fontSize: 12)),
+        backgroundColor: _kA.withOpacity(0.2),
+        deleteIcon: const Icon(Icons.close, size: 14),
+        onDeleted: () => setState(() => _objetivos.remove(o)),
+      )).toList()),
+    ],
+  ]));
+
+  void _addObjetivo() {
+    final v = _objCtrl.text.trim();
+    if (v.isNotEmpty && !_objetivos.contains(v)) {
+      setState(() { _objetivos.add(v); _objCtrl.clear(); });
+    }
   }
 
-  Widget _buildMultiChoiceSection(String title, List<String> options, Set<String> currentSet) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(title, style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.bold, color: const Color(0xFF58423B).withOpacity(0.6))),
-        const SizedBox(height: 12),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: options.map((opt) {
-            final isSelected = currentSet.contains(opt);
-            return FilterChip(
-              label: Text(opt),
-              selected: isSelected,
-              onSelected: (_) => _toggleSet(currentSet, opt),
-              selectedColor: const Color(0xFFB8D6B2),
-              backgroundColor: Colors.white,
-              labelStyle: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.bold, color: isSelected ? const Color(0xFF1E1B16) : const Color(0xFF58423B)),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999), side: const BorderSide(color: Colors.transparent)),
-            );
-          }).toList(),
-        ),
-      ],
-    );
-  }
+  Widget _sensorialCard() => _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    Text('Perfil sensorial', style: GoogleFonts.plusJakartaSans(
+        fontSize: 15, fontWeight: FontWeight.bold, color: _kText)),
+    const SizedBox(height: 16),
+    _multiChips('HIPERSENSIBILIDAD (evita)',
+        ['Ruidos fuertes', 'Texturas ásperas', 'Luces brillantes', 'Multitudes'], _hiper),
+    const SizedBox(height: 14),
+    _multiChips('HIPOSENSIBILIDAD (busca)',
+        ['Movimiento constante', 'Presión profunda', 'Morder objetos'], _hipo),
+    const SizedBox(height: 14),
+    _multiChips('COMPORTAMIENTOS REPETITIVOS',
+        ['Aleteo', 'Balanceo', 'Ecolalia', 'Alinear objetos', 'Puntillas'], _rep),
+    const SizedBox(height: 14),
+    _multiChips('INTERESES PRINCIPALES',
+        ['Dinosaurios', 'Trenes', 'Música', 'Números', 'Animales', 'Arte'], _int),
+  ]));
 
-  Widget _buildTextField(String label, String hint, TextEditingController controller) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(left: 4, bottom: 4),
-          child: Text(label, style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.bold, color: const Color(0xFF1E1B16).withOpacity(0.5))),
+  Widget _obsCard() => _card(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+    _label('OBSERVACIONES CLÍNICAS (opcional)'),
+    TextFormField(
+      controller: _obsCtrl,
+      maxLines: 4,
+      decoration: _dec('Notas clínicas relevantes para el plan...'),
+      style: GoogleFonts.plusJakartaSans(fontSize: 13),
+    ),
+  ]));
+
+  // ── Widget helpers ────────────────────────────────────────────────────────
+  Widget _card({required Widget child}) => Container(
+    width: double.infinity,
+    margin: const EdgeInsets.only(top: 12),
+    padding: const EdgeInsets.all(18),
+    decoration: BoxDecoration(color: _kSurf, borderRadius: BorderRadius.circular(18)),
+    child: child,
+  );
+
+  Widget _label(String t) => Padding(
+    padding: const EdgeInsets.only(bottom: 8),
+    child: Text(t, style: GoogleFonts.plusJakartaSans(
+        fontSize: 11, fontWeight: FontWeight.bold, color: _kSub, letterSpacing: 0.5)),
+  );
+
+  InputDecoration _dec(String hint, {IconData? icon}) => InputDecoration(
+    hintText: hint,
+    filled: true,
+    fillColor: Colors.white,
+    suffixIcon: icon != null ? Icon(icon, color: _kP, size: 18) : null,
+    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+    focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: _kP, width: 1.5)),
+    contentPadding: const EdgeInsets.all(14),
+    hintStyle: TextStyle(color: _kSub.withOpacity(0.5), fontSize: 13),
+  );
+
+  Widget _field(String hint, TextEditingController ctrl) => TextFormField(
+    controller: ctrl,
+    decoration: _dec(hint),
+    style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600),
+  );
+
+  Widget _multiChips(String label, List<String> opts, Set<String> sel) => Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      _label(label),
+      Wrap(spacing: 8, runSpacing: 6, children: opts.map((o) {
+        final s = sel.contains(o);
+        return FilterChip(
+          label: Text(o),
+          selected: s,
+          onSelected: (_) => _tog(sel, o),
+          selectedColor: _kA,
+          backgroundColor: Colors.white,
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(999),
+              side: BorderSide(color: s ? _kA : _kBdr)),
+          labelStyle: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600, fontSize: 12, color: _kText),
+          checkmarkColor: _kText,
+        );
+      }).toList()),
+    ],
+  );
+
+  Widget _saveBar({required VoidCallback onPressed, required String label}) =>
+      Container(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+        decoration: BoxDecoration(
+          color: _kBg,
+          border: Border(top: BorderSide(color: _kBdr.withOpacity(0.5))),
         ),
-        TextFormField(
-          controller: controller,
-          style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.bold),
-          decoration: InputDecoration(
-            hintText: hint,
-            filled: true,
-            fillColor: Colors.white,
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFFB8D6B2), width: 2)),
-            contentPadding: const EdgeInsets.all(16),
+        child: SizedBox(
+          width: double.infinity,
+          child: ElevatedButton(
+            onPressed: _saving ? null : onPressed,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _kP, foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 15),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              elevation: 0,
+            ),
+            child: _saving
+                ? const SizedBox(width: 20, height: 20,
+                    child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                : Text(label, style: GoogleFonts.plusJakartaSans(
+                    fontWeight: FontWeight.bold, fontSize: 15)),
           ),
         ),
-      ],
-    );
-  }
+      );
 }

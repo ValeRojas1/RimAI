@@ -34,7 +34,7 @@ class _InterestCardState extends State<InterestCard> {
           decoration: BoxDecoration(
             color: const Color(0xFFFAF2E9),
             borderRadius: BorderRadius.circular(12),
-            border: widget.isSelected 
+            border: widget.isSelected
                 ? Border.all(color: const Color(0xFFB8D6B2), width: 2)
                 : null,
             boxShadow: [
@@ -52,7 +52,8 @@ class _InterestCardState extends State<InterestCard> {
               if (widget.imageUrl != null)
                 Positioned.fill(
                   child: ClipRRect(
-                    borderRadius: BorderRadius.circular(10), // Account for border width
+                    borderRadius:
+                        BorderRadius.circular(10), // Account for border width
                     child: AnimatedScale(
                       scale: _isHovered ? 1.1 : 1.0,
                       duration: const Duration(milliseconds: 500),
@@ -61,7 +62,8 @@ class _InterestCardState extends State<InterestCard> {
                         child: Image.network(
                           widget.imageUrl!,
                           fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) => SizedBox(),
+                          errorBuilder: (context, error, stackTrace) =>
+                              SizedBox(),
                         ),
                       ),
                     ),

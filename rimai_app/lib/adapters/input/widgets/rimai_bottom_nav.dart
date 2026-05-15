@@ -58,9 +58,12 @@ class RimAIBottomNav extends StatelessWidget {
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 200),
                     curve: Curves.easeInOut,
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 20, vertical: 12),
                     decoration: BoxDecoration(
-                      color: isActive ? const Color(0xFFB8D6B2) : Colors.transparent,
+                      color: isActive
+                          ? const Color(0xFFB8D6B2)
+                          : Colors.transparent,
                       borderRadius: BorderRadius.circular(100),
                     ),
                     child: Column(
@@ -68,7 +71,9 @@ class RimAIBottomNav extends StatelessWidget {
                       children: [
                         Icon(
                           item.icon,
-                          color: isActive ? const Color(0xFF1E1B16) : const Color(0xFF58423B).withOpacity(0.5),
+                          color: isActive
+                              ? const Color(0xFF1E1B16)
+                              : const Color(0xFF58423B).withOpacity(0.5),
                         ),
                         if (isActive)
                           Padding(

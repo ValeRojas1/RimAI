@@ -10,13 +10,13 @@ import 'package:rimai_app/core/providers/dashboard_providers.dart';
 import 'package:rimai_app/core/providers/auth_providers.dart';
 
 // ── Design Tokens (PMV1) ─────────────────────────────────────────────────────
-const _kPrimary    = Color(0xFFA43714); // naranja terracota
-const _kAction     = Color(0xFFB8D6B2); // verde salvia
-const _kBg         = Color(0xFFFFF8F2); // fondo cálido
-const _kSurface    = Color(0xFFFAF2E9); // surface tarjetas
-const _kText       = Color(0xFF1E1B16); // texto principal
-const _kSubtext    = Color(0xFF58423B); // texto secundario
-const _kBorder     = Color(0xFFDFC0B7); // borde suave
+const _kPrimary = Color(0xFFA43714); // naranja terracota
+const _kAction = Color(0xFFB8D6B2); // verde salvia
+const _kBg = Color(0xFFFFF8F2); // fondo cálido
+const _kSurface = Color(0xFFFAF2E9); // surface tarjetas
+const _kText = Color(0xFF1E1B16); // texto principal
+const _kSubtext = Color(0xFF58423B); // texto secundario
+const _kBorder = Color(0xFFDFC0B7); // borde suave
 
 class DashboardScreen extends ConsumerWidget {
   const DashboardScreen({super.key});
@@ -59,9 +59,12 @@ class DashboardScreen extends ConsumerWidget {
       bottomNavigationBar: RimAIBottomNav(
         currentIndex: 0,
         onTap: (i) {
-          if (i == 1) context.go('/terapeuta/sesion');
-          if (i == 2) context.go('/terapeuta/ia');
-          if (i == 3) context.go('/terapeuta/progreso');
+          final pacientes = dashboardAsync.valueOrNull?.pacientes ?? [];
+          if (pacientes.isEmpty) return;
+          final first = pacientes.first;
+          if (i == 1) context.go('/terapeuta/plan/${first.id}');
+          if (i == 2) context.go('/terapeuta/ia/${first.id}');
+          if (i == 3) context.go('/terapeuta/progreso/${first.id}');
         },
         items: [
           BottomNavItem(icon: Icons.home_rounded, label: 'Inicio'),
@@ -72,7 +75,10 @@ class DashboardScreen extends ConsumerWidget {
       ),
       body: RefreshIndicator(
         color: _kPrimary,
-        onRefresh: () async => ref.invalidate(dashboardProvider),
+        onRefresh: () async {
+          ref.invalidate(dashboardProvider);
+          ref.invalidate(pendientesProvider);
+        },
         child: SingleChildScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
           padding: EdgeInsets.only(
@@ -83,7 +89,17 @@ class DashboardScreen extends ConsumerWidget {
           ),
           child: dashboardAsync.when(
             loading: () => _buildSkeleton(),
-            error: (err, _) => _buildError(context, ref, err.toString()),
+            error: (err, _) {
+              // Si la sesión expiró, redirigir automáticamente al login
+              if (err is SessionExpiredException) {
+                WidgetsBinding.instance.addPostFrameCallback((_) async {
+                  await ref.read(authStorageProvider).clearSession();
+                  if (context.mounted) context.go('/auth/login');
+                });
+              }
+              return _buildError(context, ref, err.toString(),
+                  isSessionError: err is SessionExpiredException);
+            },
             data: (data) => _buildContent(context, ref, data),
           ),
         ),
@@ -93,26 +109,34 @@ class DashboardScreen extends ConsumerWidget {
 
   // ── Content ────────────────────────────────────────────────────────────────
 
-  Widget _buildContent(BuildContext context, WidgetRef ref, DashboardData data) {
+  Widget _buildContent(
+      BuildContext context, WidgetRef ref, DashboardData data) {
+    final pendientesAsync = ref.watch(pendientesProvider);
+    final pendienteCount = pendientesAsync.valueOrNull?.length ?? 0;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildGreeting(),
+        _buildGreeting(data),
         const SizedBox(height: 32),
 
-        // ── Sección A: KPIs ─────────────────────────────────────────────────
+        // ── Sección KPIs ─────────────────────────────────────────────────────
         const _SectionHeader(label: 'RESUMEN RÁPIDO'),
         const SizedBox(height: 16),
         _buildKPIRow(data),
         const SizedBox(height: 32),
 
-        // ── Sección C: Accesos directos ─────────────────────────────────────
+        // ── Sección Accesos rápidos ─────────────────────────────────────
         const _SectionHeader(label: 'ACCESOS RÁPIDOS'),
         const SizedBox(height: 16),
         _buildQuickAccess(context, data),
         const SizedBox(height: 32),
 
-        // ── Sección B: Pacientes ────────────────────────────────────────────
+        // ── Sección Solicitudes pendientes ──────────────────────────────
+        if (pendienteCount > 0) ..._buildPendientesSection(context, ref, pendienteCount),
+        if (pendienteCount > 0) const SizedBox(height: 32),
+
+        // ── Sección Pacientes activos ──────────────────────────────────────
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
@@ -124,22 +148,99 @@ class DashboardScreen extends ConsumerWidget {
           ],
         ),
         const SizedBox(height: 16),
-        ...data.pacientes.map((p) => Padding(
-          padding: const EdgeInsets.only(bottom: 16),
-          child: _PacienteCard(paciente: p),
-        )),
+        if (data.pacientes.isEmpty)
+          BentoCard(
+            backgroundColor: _kSurface,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Aun no hay pacientes activos',
+                    style:
+                        TextStyle(fontWeight: FontWeight.bold, color: _kText)),
+                const SizedBox(height: 12),
+                const Text(
+                    'Registra o vincula el primer paciente para iniciar el plan terapeutico.',
+                    style: TextStyle(color: _kSubtext)),
+                const SizedBox(height: 16),
+                ElevatedButton(
+                  onPressed: () => context.go('/terapeuta/pendientes'),
+                  style: ElevatedButton.styleFrom(
+                      backgroundColor: _kAction, foregroundColor: _kText),
+                  child: const Text('Ver solicitudes'),
+                ),
+              ],
+            ),
+          )
+        else
+          ...data.pacientes.map((p) => Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: _PacienteCard(paciente: p),
+              )),
       ],
     );
   }
 
-  Widget _buildGreeting() {
+  List<Widget> _buildPendientesSection(BuildContext context, WidgetRef ref, int count) {
+    return [
+      Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+        Row(children: [
+          const _SectionHeader(label: 'SOLICITUDES PENDIENTES'),
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            decoration: BoxDecoration(color: _kPrimary, borderRadius: BorderRadius.circular(100)),
+            child: Text('$count', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+          ),
+        ]),
+        GestureDetector(
+          onTap: () => context.go('/terapeuta/pendientes'),
+          child: const Text('Ver todos', style: TextStyle(color: _kPrimary, fontSize: 13, fontWeight: FontWeight.bold)),
+        ),
+      ]),
+      const SizedBox(height: 12),
+      BentoCard(
+        backgroundColor: const Color(0xFFFDE8E8),
+        child: Row(children: [
+          const Icon(Icons.pending_actions_rounded, color: _kPrimary, size: 28),
+          const SizedBox(width: 14),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(
+              '$count ${count == 1 ? "niño espera" : "niños esperan"} ser vinculado${count == 1 ? "" : "s"}',
+              style: const TextStyle(fontWeight: FontWeight.bold, color: _kText, fontSize: 14),
+            ),
+            const SizedBox(height: 4),
+            const Text('Revisa los expedientes y acepta la vinculación.',
+                style: TextStyle(color: _kSubtext, fontSize: 12)),
+          ])),
+          const SizedBox(width: 10),
+          ElevatedButton(
+            onPressed: () => context.go('/terapeuta/pendientes'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _kPrimary, foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              elevation: 0,
+            ),
+            child: const Text('Revisar', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+          ),
+        ]),
+      ),
+    ];
+  }
+
+  Widget _buildGreeting(DashboardData data) {
     final hour = DateTime.now().hour;
-    final greeting = hour < 12 ? 'Buenos días' : hour < 19 ? 'Buenas tardes' : 'Buenas noches';
+    final greeting = hour < 12
+        ? 'Buenos días'
+        : hour < 19
+            ? 'Buenas tardes'
+            : 'Buenas noches';
+    final nombre = data.terapeutaNombre?.split(' ').first;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          greeting,
+          nombre == null ? greeting : '$greeting, $nombre',
           style: const TextStyle(fontSize: 14, color: _kSubtext),
         ),
         const SizedBox(height: 4),
@@ -177,7 +278,9 @@ class DashboardScreen extends ConsumerWidget {
           label: 'ALERTAS',
           value: data.alertasBajaAdherencia.toString(),
           icon: Icons.warning_amber_rounded,
-          accent: data.alertasBajaAdherencia > 0 ? const Color(0xFFBA1A1A) : const Color(0xFF22C55E),
+          accent: data.alertasBajaAdherencia > 0
+              ? const Color(0xFFBA1A1A)
+              : const Color(0xFF22C55E),
           subtitle: 'baja adherencia',
         ),
       ];
@@ -206,6 +309,8 @@ class DashboardScreen extends ConsumerWidget {
   }
 
   Widget _buildQuickAccess(BuildContext context, DashboardData data) {
+    final firstPatient =
+        data.pacientes.isNotEmpty ? data.pacientes.first : null;
     return Wrap(
       spacing: 12,
       runSpacing: 12,
@@ -213,7 +318,10 @@ class DashboardScreen extends ConsumerWidget {
         _QuickAccessButton(
           label: 'Asistente IA',
           icon: Icons.auto_awesome,
-          onTap: () => context.go('/terapeuta/ia'),
+          onTap: () {
+            if (firstPatient != null)
+              context.go('/terapeuta/ia/${firstPatient.id}');
+          },
         ),
         _QuickAccessButton(
           label: 'Vincular Paciente',
@@ -223,13 +331,25 @@ class DashboardScreen extends ConsumerWidget {
         _QuickAccessButton(
           label: 'Nueva Sesión',
           icon: Icons.add_circle_outline_rounded,
-          onTap: () => context.go('/terapeuta/sesion'),
+          onTap: () {
+            if (firstPatient != null)
+              context.go('/terapeuta/plan/${firstPatient.id}');
+          },
+        ),
+        _QuickAccessButton(
+          label: 'Ver progreso',
+          icon: Icons.insights,
+          onTap: () {
+            if (firstPatient != null)
+              context.go('/terapeuta/progreso/${firstPatient.id}');
+          },
         ),
         if (data.pacientes.isNotEmpty)
           _QuickAccessButton(
             label: 'Validación IA',
             icon: Icons.verified_outlined,
-            onTap: () => context.go('/terapeuta/validacion/${data.pacientes.first.id}'),
+            onTap: () =>
+                context.go('/terapeuta/validacion/${data.pacientes.first.id}'),
           ),
       ],
     );
@@ -270,35 +390,67 @@ class DashboardScreen extends ConsumerWidget {
         ),
       );
 
-  Widget _buildError(BuildContext context, WidgetRef ref, String err) {
+  Widget _buildError(BuildContext context, WidgetRef ref, String err,
+      {bool isSessionError = false}) {
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.cloud_off_rounded, size: 64, color: _kSubtext),
+          Icon(
+            isSessionError
+                ? Icons.lock_outline_rounded
+                : Icons.cloud_off_rounded,
+            size: 64,
+            color: _kSubtext,
+          ),
           const SizedBox(height: 16),
-          const Text(
-            'No se pudo conectar al servidor',
-            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: _kText),
+          Text(
+            isSessionError
+                ? 'Sesión expirada'
+                : 'No se pudo conectar al servidor',
+            style: const TextStyle(
+                fontWeight: FontWeight.bold, fontSize: 18, color: _kText),
           ),
           const SizedBox(height: 8),
           Text(
-            err,
+            isSessionError
+                ? 'Tu sesión ha expirado. Inicia sesión de nuevo.'
+                : err,
             textAlign: TextAlign.center,
             style: const TextStyle(color: _kSubtext),
           ),
           const SizedBox(height: 24),
-          ElevatedButton.icon(
-            onPressed: () => ref.invalidate(dashboardProvider),
-            icon: const Icon(Icons.refresh),
-            label: const Text('Reintentar'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: _kPrimary,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(100)),
+          if (isSessionError)
+            ElevatedButton.icon(
+              onPressed: () async {
+                await ref.read(authStorageProvider).clearSession();
+                if (context.mounted) context.go('/auth/login');
+              },
+              icon: const Icon(Icons.login),
+              label: const Text('Ir al Login'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _kPrimary,
+                foregroundColor: Colors.white,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(100)),
+              ),
+            )
+          else
+            ElevatedButton.icon(
+              onPressed: () => ref.invalidate(dashboardProvider),
+              icon: const Icon(Icons.refresh),
+              label: const Text('Reintentar'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _kPrimary,
+                foregroundColor: Colors.white,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(100)),
+              ),
             ),
-          ),
         ],
       ),
     );
@@ -368,9 +520,15 @@ class _MetricCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 4),
-          Text(label, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _kSubtext, letterSpacing: 1)),
+          Text(label,
+              style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: _kSubtext,
+                  letterSpacing: 1)),
           if (subtitle != null)
-            Text(subtitle!, style: const TextStyle(fontSize: 12, color: _kSubtext)),
+            Text(subtitle!,
+                style: const TextStyle(fontSize: 12, color: _kSubtext)),
         ],
       ),
     );
@@ -505,12 +663,14 @@ class _PacienteCard extends ConsumerWidget {
                   color: tasaColor,
                 ),
               ),
-              const Text('precisión', style: TextStyle(fontSize: 11, color: _kSubtext)),
+              const Text('precisión',
+                  style: TextStyle(fontSize: 11, color: _kSubtext)),
               const SizedBox(height: 12),
               GestureDetector(
-                onTap: () => context.go('/terapeuta/perfil/${paciente.id}'),
+                onTap: () => context.go('/terapeuta/nino/${paciente.id}'),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   decoration: BoxDecoration(
                     color: _kAction,
                     borderRadius: BorderRadius.circular(100),

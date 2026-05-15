@@ -50,7 +50,9 @@ class AdminDashboardScreen extends ConsumerWidget {
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
                 child: estadisticasAsync.when(
-                  loading: () => const Center(child: CircularProgressIndicator(color: Color(0xFFA43714))),
+                  loading: () => const Center(
+                      child:
+                          CircularProgressIndicator(color: Color(0xFFA43714))),
                   error: (err, stack) => Text('Error al cargar stats: $err'),
                   data: (stats) => Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -72,10 +74,24 @@ class AdminDashboardScreen extends ConsumerWidget {
                         physics: const NeverScrollableScrollPhysics(),
                         childAspectRatio: 1.5,
                         children: [
-                          _buildStatCard('Terapeutas', stats.totalTerapeutas.toString(), Icons.psychology, const Color(0xFFB8D6B2)),
-                          _buildStatCard('Familias', stats.totalFamilias.toString(), Icons.family_restroom, const Color(0xFFE5DCC4)),
-                          _buildStatCard('Niños', stats.totalNinos.toString(), Icons.child_care, const Color(0xFFDFB7B7)),
-                          _buildStatCard('Sesiones', stats.totalSesiones.toString(), Icons.check_circle, const Color(0xFF4A624D), isDark: true),
+                          _buildStatCard(
+                              'Terapeutas',
+                              stats.totalTerapeutas.toString(),
+                              Icons.psychology,
+                              const Color(0xFFB8D6B2)),
+                          _buildStatCard(
+                              'Familias',
+                              stats.totalFamilias.toString(),
+                              Icons.family_restroom,
+                              const Color(0xFFE5DCC4)),
+                          _buildStatCard('Niños', stats.totalNinos.toString(),
+                              Icons.child_care, const Color(0xFFDFB7B7)),
+                          _buildStatCard(
+                              'Sesiones',
+                              stats.totalSesiones.toString(),
+                              Icons.check_circle,
+                              const Color(0xFF4A624D),
+                              isDark: true),
                         ],
                       ),
                     ],
@@ -87,7 +103,8 @@ class AdminDashboardScreen extends ConsumerWidget {
             // ── Título Lista Usuarios ──
             SliverToBoxAdapter(
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
                 child: Text(
                   'Gestión de Usuarios',
                   style: GoogleFonts.plusJakartaSans(
@@ -101,46 +118,71 @@ class AdminDashboardScreen extends ConsumerWidget {
 
             // ── Sección: Lista de Usuarios ──
             usuariosAsync.when(
-              loading: () => const SliverToBoxAdapter(child: Center(child: CircularProgressIndicator(color: Color(0xFFB8D6B2)))),
-              error: (err, stack) => SliverToBoxAdapter(child: Center(child: Text('Error: $err', style: const TextStyle(color: Colors.red)))),
+              loading: () => const SliverToBoxAdapter(
+                  child: Center(
+                      child:
+                          CircularProgressIndicator(color: Color(0xFFB8D6B2)))),
+              error: (err, stack) => SliverToBoxAdapter(
+                  child: Center(
+                      child: Text('Error: $err',
+                          style: const TextStyle(color: Colors.red)))),
               data: (usuarios) {
                 if (usuarios.isEmpty) {
-                  return const SliverToBoxAdapter(child: Center(child: Text('No hay usuarios registrados.')));
+                  return const SliverToBoxAdapter(
+                      child:
+                          Center(child: Text('No hay usuarios registrados.')));
                 }
                 return SliverPadding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16.0, vertical: 8.0),
                   sliver: SliverList(
                     delegate: SliverChildBuilderDelegate(
                       (context, index) {
                         final user = usuarios[index];
                         return Card(
                           margin: const EdgeInsets.only(bottom: 12),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16)),
                           elevation: 1,
                           child: ListTile(
-                            contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                            contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 20, vertical: 8),
                             leading: CircleAvatar(
-                              backgroundColor: user.rol == 'terapeuta' 
-                                  ? const Color(0xFFB8D6B2) 
-                                  : user.rol == 'admin' ? const Color(0xFFDFB7B7) : const Color(0xFFE5DCC4),
+                              backgroundColor: user.rol == 'terapeuta'
+                                  ? const Color(0xFFB8D6B2)
+                                  : user.rol == 'admin'
+                                      ? const Color(0xFFDFB7B7)
+                                      : const Color(0xFFE5DCC4),
                               child: Icon(
-                                user.rol == 'terapeuta' ? Icons.psychology : user.rol == 'admin' ? Icons.admin_panel_settings : Icons.family_restroom,
+                                user.rol == 'terapeuta'
+                                    ? Icons.psychology
+                                    : user.rol == 'admin'
+                                        ? Icons.admin_panel_settings
+                                        : Icons.family_restroom,
                                 color: const Color(0xFF1E1B16),
                               ),
                             ),
-                            title: Text(user.nombre, style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.bold)),
+                            title: Text(user.nombre,
+                                style: GoogleFonts.plusJakartaSans(
+                                    fontWeight: FontWeight.bold)),
                             subtitle: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(user.email, style: GoogleFonts.plusJakartaSans(fontSize: 12, color: Colors.black54)),
+                                Text(user.email,
+                                    style: GoogleFonts.plusJakartaSans(
+                                        fontSize: 12, color: Colors.black54)),
                                 const SizedBox(height: 4),
                                 Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 2),
                                   decoration: BoxDecoration(
                                     color: const Color(0xFFF5EDE4),
                                     borderRadius: BorderRadius.circular(4),
                                   ),
-                                  child: Text(user.rol.toUpperCase(), style: GoogleFonts.plusJakartaSans(fontSize: 10, fontWeight: FontWeight.bold)),
+                                  child: Text(user.rol.toUpperCase(),
+                                      style: GoogleFonts.plusJakartaSans(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold)),
                                 ),
                               ],
                             ),
@@ -152,17 +194,23 @@ class AdminDashboardScreen extends ConsumerWidget {
                                   activeColor: const Color(0xFF4A624D),
                                   onChanged: (val) async {
                                     try {
-                                      await ref.read(adminServiceProvider).actualizarEstado(user.id, val);
+                                      await ref
+                                          .read(adminServiceProvider)
+                                          .actualizarEstado(user.id, val);
                                       ref.invalidate(listaUsuariosProvider);
                                     } catch (e) {
-                                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(SnackBar(
+                                              content: Text('Error: $e')));
                                     }
                                   },
                                 ),
                                 IconButton(
-                                  icon: const Icon(Icons.delete_outline, color: Colors.red),
+                                  icon: const Icon(Icons.delete_outline,
+                                      color: Colors.red),
                                   tooltip: 'Eliminar usuario',
-                                  onPressed: () => _mostrarDialogoEliminar(context, ref, user.id, user.nombre),
+                                  onPressed: () => _mostrarDialogoEliminar(
+                                      context, ref, user.id, user.nombre),
                                 ),
                               ],
                             ),
@@ -175,8 +223,9 @@ class AdminDashboardScreen extends ConsumerWidget {
                 );
               },
             ),
-            
-            const SliverPadding(padding: EdgeInsets.only(bottom: 80)), // Espacio para el FAB
+
+            const SliverPadding(
+                padding: EdgeInsets.only(bottom: 80)), // Espacio para el FAB
           ],
         ),
       ),
@@ -184,20 +233,26 @@ class AdminDashboardScreen extends ConsumerWidget {
         onPressed: () => context.push('/admin/nuevo-terapeuta'),
         backgroundColor: const Color(0xFFA43714),
         icon: const Icon(Icons.person_add, color: Colors.white),
-        label: Text('Nuevo Terapeuta', style: GoogleFonts.plusJakartaSans(color: Colors.white, fontWeight: FontWeight.bold)),
+        label: Text('Nuevo Terapeuta',
+            style: GoogleFonts.plusJakartaSans(
+                color: Colors.white, fontWeight: FontWeight.bold)),
       ),
     );
   }
 
-  void _mostrarDialogoEliminar(BuildContext context, WidgetRef ref, String id, String nombre) {
+  void _mostrarDialogoEliminar(
+      BuildContext context, WidgetRef ref, String id, String nombre) {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         title: Row(
           children: [
-            const Icon(Icons.warning_amber_rounded, color: Colors.red, size: 28),
+            const Icon(Icons.warning_amber_rounded,
+                color: Colors.red, size: 28),
             const SizedBox(width: 8),
-            Text('Eliminar Usuario', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.bold, fontSize: 18)),
+            Text('Eliminar Usuario',
+                style: GoogleFonts.plusJakartaSans(
+                    fontWeight: FontWeight.bold, fontSize: 18)),
           ],
         ),
         content: Text(
@@ -207,7 +262,8 @@ class AdminDashboardScreen extends ConsumerWidget {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancelar', style: TextStyle(color: Colors.black54)),
+            child:
+                const Text('Cancelar', style: TextStyle(color: Colors.black54)),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
@@ -219,7 +275,9 @@ class AdminDashboardScreen extends ConsumerWidget {
                 ref.invalidate(estadisticasAdminProvider);
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Usuario eliminado exitosamente'), backgroundColor: Color(0xFF4A624D)),
+                    const SnackBar(
+                        content: Text('Usuario eliminado exitosamente'),
+                        backgroundColor: Color(0xFF4A624D)),
                   );
                 }
               } catch (e) {
@@ -234,14 +292,16 @@ class AdminDashboardScreen extends ConsumerWidget {
                 }
               }
             },
-            child: const Text('Sí, eliminar', style: TextStyle(color: Colors.white)),
+            child: const Text('Sí, eliminar',
+                style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildStatCard(String title, String value, IconData icon, Color color, {bool isDark = false}) {
+  Widget _buildStatCard(String title, String value, IconData icon, Color color,
+      {bool isDark = false}) {
     final textColor = isDark ? Colors.white : const Color(0xFF1E1B16);
     return Container(
       padding: const EdgeInsets.all(16),

@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, String, Boolean, DateTime, Text, Float, Integer, Date, ARRAY, Enum as SAEnum, ForeignKey
+from sqlalchemy import Column, String, Boolean, DateTime, Text, Float, Integer, Date, ARRAY, Enum as SAEnum, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import DeclarativeBase, relationship
 from sqlalchemy.sql import func
@@ -9,6 +9,8 @@ import enum
 class Base(DeclarativeBase):
     pass
 
+
+# ── Enums ─────────────────────────────────────────────────────────────────────
 
 class RolUsuario(str, enum.Enum):
     terapeuta = "terapeuta"
@@ -34,6 +36,17 @@ class EstadoSesion(str, enum.Enum):
     pendiente_sync = "pendiente_sync"
 
 
+class EstadoClinico(str, enum.Enum):
+    """Ciclo de vida clínico-administrativo de un niño en RimAI."""
+    pendiente_asignacion = "pendiente_asignacion"
+    vinculado_terapeuta = "vinculado_terapeuta"
+    perfil_clinico_incompleto = "perfil_clinico_incompleto"
+    listo_para_plan = "listo_para_plan"
+    plan_activo = "plan_activo"
+
+
+# ── Modelos ───────────────────────────────────────────────────────────────────
+
 class Usuario(Base):
     __tablename__ = "usuarios"
 
@@ -58,7 +71,7 @@ class Terapeuta(Base):
     colegiatura = Column(String(50))
 
     usuario = relationship("Usuario", back_populates="terapeuta")
-    ninos = relationship("Nino", back_populates="terapeuta")
+    ninos = relationship("Nino", back_populates="terapeuta", foreign_keys="Nino.terapeuta_id")
 
 
 class PadreTutor(Base):
@@ -75,15 +88,40 @@ class Nino(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     nombre = Column(String(150), nullable=False)
     fecha_nacimiento = Column(Date, nullable=False)
-    nivel_cognitivo = Column(SAEnum(NivelCognitivo, name="nivel_cognitivo"), nullable=False)
+    nivel_cognitivo = Column(
+        SAEnum(NivelCognitivo, name="nivel_cognitivo"),
+        nullable=True,
+        default=NivelCognitivo.Medio,
+    )
     perfil_sensorial = Column(JSONB)
     objetivos_intervencion = Column(ARRAY(Text))
-    terapeuta_id = Column(UUID(as_uuid=True), ForeignKey("terapeutas.id"), nullable=False)
+    diagnostico = Column(String(200))
+    documento_diagnostico = Column(String(255))
+    terapeuta_id = Column(UUID(as_uuid=True), ForeignKey("terapeutas.id"), nullable=True)
     tutor_id = Column(UUID(as_uuid=True), ForeignKey("padres_tutores.id"))
     activo = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
-    terapeuta = relationship("Terapeuta", back_populates="ninos")
+    # ── Estado clínico-administrativo ────────────────────────────────────────
+    estado_clinico = Column(
+        SAEnum(EstadoClinico, name="estado_clinico"),
+        nullable=False,
+        default=EstadoClinico.pendiente_asignacion,
+        server_default="pendiente_asignacion",
+    )
+
+    # ── Trazabilidad: quién hizo qué y cuándo ────────────────────────────────
+    # Tutor que registró al niño
+    creado_por = Column(UUID(as_uuid=True), ForeignKey("padres_tutores.id"), nullable=True)
+    # Terapeuta que aceptó la vinculación
+    vinculado_por = Column(UUID(as_uuid=True), ForeignKey("terapeutas.id"), nullable=True)
+    # Timestamp de la vinculación
+    vinculado_at = Column(DateTime(timezone=True), nullable=True)
+    # Timestamp cuando el perfil clínico fue marcado como completo
+    perfil_completado_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Relaciones — foreign_keys explícitas por las FKs múltiples a terapeutas
+    terapeuta = relationship("Terapeuta", back_populates="ninos", foreign_keys=[terapeuta_id])
     sesiones = relationship("Sesion", back_populates="nino")
     planes = relationship("PlanTerapeutico", back_populates="nino")
 
@@ -100,11 +138,14 @@ class Actividad(Base):
     recursos_multimedia = Column(JSONB)
     activo = Column(Boolean, default=True)
 
+    planes = relationship("PlanActividad", back_populates="actividad")
+
 
 class PlanTerapeutico(Base):
     __tablename__ = "planes_terapeuticos"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    nombre = Column(String(200), nullable=False, default="Plan terapeutico activo")
     nino_id = Column(UUID(as_uuid=True), ForeignKey("ninos.id"), nullable=False)
     terapeuta_id = Column(UUID(as_uuid=True), ForeignKey("terapeutas.id"), nullable=False)
     fecha_inicio = Column(Date, nullable=False)
@@ -116,6 +157,18 @@ class PlanTerapeutico(Base):
 
     nino = relationship("Nino", back_populates="planes")
     sesiones = relationship("Sesion", back_populates="plan")
+    actividades = relationship("PlanActividad", back_populates="plan", cascade="all, delete-orphan")
+
+
+class PlanActividad(Base):
+    __tablename__ = "plan_actividades"
+
+    plan_id = Column(UUID(as_uuid=True), ForeignKey("planes_terapeuticos.id", ondelete="CASCADE"), primary_key=True)
+    actividad_id = Column(UUID(as_uuid=True), ForeignKey("actividades.id"), primary_key=True)
+    orden = Column(Integer)
+
+    plan = relationship("PlanTerapeutico", back_populates="actividades")
+    actividad = relationship("Actividad", back_populates="planes")
 
 
 class Sesion(Base):
@@ -145,8 +198,22 @@ class ResultadoActividad(Base):
     aciertos = Column(Integer)
     repeticiones = Column(Integer)
     nivel_ayuda_requerido = Column(Integer, default=0)
+    nivel_dificultad_usado = Column(SAEnum(NivelDificultad, name="nivel_dificultad"), default="Medio")
+    observaciones = Column(Text)
     emocion_detectada = Column(String(50))
     confianza_emocion = Column(Float)
     timestamp = Column(DateTime(timezone=True), server_default=func.now())
 
     sesion = relationship("Sesion", back_populates="resultados")
+
+
+class DecisionClinica(Base):
+    __tablename__ = "decisiones_clinicas"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    terapeuta_id = Column(UUID(as_uuid=True), ForeignKey("terapeutas.id"), nullable=False)
+    nino_id = Column(UUID(as_uuid=True), ForeignKey("ninos.id"))
+    recomendacion_id = Column(String(120), nullable=False)
+    accion = Column(String(40), nullable=False)
+    observacion = Column(Text)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

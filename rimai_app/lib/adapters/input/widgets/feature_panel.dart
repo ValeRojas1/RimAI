@@ -46,7 +46,8 @@ class RimAIFeaturePanel extends StatelessWidget {
           ),
           // Contenido principal
           Padding(
-            padding: const EdgeInsets.all(48), // Padding superior de la directiva
+            padding:
+                const EdgeInsets.all(48), // Padding superior de la directiva
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [

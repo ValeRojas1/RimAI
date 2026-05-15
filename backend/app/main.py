@@ -4,6 +4,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.auth import router as auth_router
 from app.routes.pacientes import router as dashboard_router
 from app.routes.admin import router as admin_router
+from app.database import engine
+from app.models import Base
 
 app = FastAPI(
     title="RimAI API",
@@ -23,6 +25,11 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(dashboard_router)
 app.include_router(admin_router)
+
+
+@app.on_event("startup")
+def startup():
+    Base.metadata.create_all(bind=engine)
 
 
 @app.get("/")

@@ -7,3 +7,5 @@ rimai_pgdata/
 # IDE
 .vscode/settings.json
 .idea/build/
+__pycache__/
+*.pyc

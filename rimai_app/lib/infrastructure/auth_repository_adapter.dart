@@ -3,9 +3,7 @@ import 'package:rimai_app/domain/entities/usuario.dart';
 import 'package:rimai_app/domain/entities/registro_usuario_request.dart';
 import 'package:rimai_app/domain/ports/output/auth_repository_port.dart';
 
-// Dispositivo físico con USB: usa 'adb reverse tcp:8000 tcp:8000' y deja localhost
-// Emulador Android: cambia a 10.0.2.2
-const String _kBaseUrl = 'http://localhost:8000';
+import 'package:rimai_app/core/constants/api_constants.dart';
 
 /// Adaptador de salida: implementación HTTP real del repositorio de autenticación.
 /// Se comunica con el backend FastAPI a través de Dio.
@@ -14,7 +12,7 @@ class AuthRepositoryAdapter implements AuthRepositoryPort {
 
   AuthRepositoryAdapter() {
     _dio = Dio(BaseOptions(
-      baseUrl: _kBaseUrl,
+      baseUrl: ApiConstants.baseUrl,
       connectTimeout: const Duration(seconds: 10),
       receiveTimeout: const Duration(seconds: 10),
     ));
@@ -22,15 +20,30 @@ class AuthRepositoryAdapter implements AuthRepositoryPort {
 
   @override
   Future<Usuario> registrarUsuario(RegistroUsuarioRequest request) async {
-    // El endpoint de registro no está en el MVP — redirigir a login con mock
-    await Future.delayed(const Duration(seconds: 1));
-    return Usuario(
-      id: 'mock-uid-001',
-      nombreCompleto: request.nombreCompleto,
-      correo: request.correo,
-      rol: 'terapeuta',
-      token: 'mock-jwt-token',
-    );
+    try {
+      final response = await _dio.post(
+        '/api/auth/register',
+        data: {
+          'nombre': request.nombreCompleto,
+          'email': request.correo,
+          'password': request.contrasena,
+        },
+      );
+
+      final data = response.data as Map<String, dynamic>;
+
+      return Usuario(
+        id: data['user_id'],
+        nombreCompleto: data['nombre'],
+        correo: request.correo,
+        rol: data['rol'],
+        token: data['access_token'],
+      );
+    } on DioException catch (e) {
+      final message =
+          e.response?.data?['detail'] ?? 'Error de conexión con el servidor';
+      throw Exception('$message');
+    }
   }
 
   @override
@@ -55,7 +68,8 @@ class AuthRepositoryAdapter implements AuthRepositoryPort {
       );
     } on DioException catch (e) {
       final statusCode = e.response?.statusCode;
-      final message = e.response?.data?['detail'] ?? 'Error de conexión con el servidor';
+      final message =
+          e.response?.data?['detail'] ?? 'Error de conexión con el servidor';
 
       if (statusCode == 401) {
         throw Exception('Email o contraseña incorrectos');

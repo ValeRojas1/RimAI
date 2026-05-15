@@ -9,6 +9,7 @@ import 'package:rimai_app/adapters/input/screens/profile/therapeutic_profile_scr
 import 'package:rimai_app/adapters/input/screens/ia/ia_assistant_screen.dart';
 import 'package:rimai_app/adapters/input/screens/session/active_session_screen.dart';
 import 'package:rimai_app/adapters/input/screens/session/session_summary_screen.dart';
+import 'package:rimai_app/adapters/input/screens/session/therapeutic_plan_screen.dart';
 import 'package:rimai_app/adapters/input/screens/progress/progress_screen.dart';
 import 'package:rimai_app/adapters/input/screens/validation/clinical_validation_screen.dart';
 import 'package:rimai_app/adapters/input/screens/dashboard/dashboard_screen.dart';
@@ -16,6 +17,7 @@ import 'package:rimai_app/adapters/input/screens/dashboard/familia_dashboard_scr
 import 'package:rimai_app/adapters/input/screens/dashboard/admin_dashboard_screen.dart';
 import 'package:rimai_app/adapters/input/screens/admin/create_therapist_screen.dart';
 import 'package:rimai_app/adapters/input/screens/dashboard/patient_admission_screen.dart';
+import 'package:rimai_app/adapters/input/screens/dashboard/pending_patients_screen.dart';
 import 'package:rimai_app/core/providers/auth_providers.dart';
 
 /// Proveedor del enrutador principal de la aplicación, conectado al estado de Riverpod.
@@ -28,18 +30,41 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       final token = await authStorage.getToken();
       final isAuthRoute = state.uri.toString().startsWith('/auth');
 
-      // Sin token y fuera de auth → login
-      if (token == null && !isAuthRoute) return '/auth/login';
+      // Sin token → siempre al login
+      if (token == null) {
+        return isAuthRoute ? null : '/auth/login';
+      }
 
-      // Con token y en auth → redirigir al dashboard según rol
-      if (token != null && isAuthRoute) {
+      // Con token en ruta de auth → verificar con el servidor si sigue válido
+      if (isAuthRoute) {
+        final isValid = await authStorage.isTokenValidOnServer();
+        if (!isValid) {
+          // Token expirado: sesión ya limpiada → permanecer en login
+          return '/auth/login';
+        }
+        // Token válido → ir al dashboard correspondiente
         final role = await authStorage.getRole();
         if (role == 'terapeuta') return '/terapeuta/dashboard';
-        if (role == 'padre_tutor' || role == 'tutor') return '/familia/dashboard';
+        if (role == 'padre_tutor' || role == 'tutor')
+          return '/familia/dashboard';
         if (role == 'admin') return '/admin/dashboard';
         return '/terapeuta/dashboard'; // fallback
       }
 
+      // Con token en ruta protegida → dejar pasar
+      final role = await authStorage.getRole();
+      final location = state.uri.toString();
+      if (location.startsWith('/admin') && role != 'admin') {
+        return '/auth/login';
+      }
+      if (location.startsWith('/terapeuta') && role != 'terapeuta') {
+        return role == 'admin' ? '/admin/dashboard' : '/familia/dashboard';
+      }
+      if (location.startsWith('/familia') &&
+          role != 'padre_tutor' &&
+          role != 'tutor') {
+        return role == 'admin' ? '/admin/dashboard' : '/terapeuta/dashboard';
+      }
       return null;
     },
     routes: [
@@ -58,8 +83,9 @@ final appRouterProvider = Provider<GoRouter>((ref) {
               key: state.pageKey,
               child: const LoginScreen(),
               transitionDuration: const Duration(milliseconds: 400),
-              transitionsBuilder: (context, animation, secondaryAnimation, child) =>
-                  FadeTransition(opacity: animation, child: child),
+              transitionsBuilder:
+                  (context, animation, secondaryAnimation, child) =>
+                      FadeTransition(opacity: animation, child: child),
             ),
           ),
           GoRoute(
@@ -69,8 +95,9 @@ final appRouterProvider = Provider<GoRouter>((ref) {
               key: state.pageKey,
               child: const RegisterScreen(),
               transitionDuration: const Duration(milliseconds: 400),
-              transitionsBuilder: (context, animation, secondaryAnimation, child) =>
-                  FadeTransition(opacity: animation, child: child),
+              transitionsBuilder:
+                  (context, animation, secondaryAnimation, child) =>
+                      FadeTransition(opacity: animation, child: child),
             ),
           ),
         ],
@@ -82,10 +109,22 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const DashboardScreen(),
       ),
       GoRoute(
-        path: '/terapeuta/perfil/:ninoId',
+        path: '/terapeuta/nino/:ninoId',
         builder: (context, state) {
           final ninoId = state.pathParameters['ninoId'] ?? '1';
           return TherapeuticProfileScreen(ninoId: ninoId);
+        },
+      ),
+      GoRoute(
+        path: '/terapeuta/perfil/:ninoId',
+        redirect: (_, state) =>
+            '/terapeuta/nino/${state.pathParameters['ninoId']}',
+      ),
+      GoRoute(
+        path: '/terapeuta/plan/:ninoId',
+        builder: (context, state) {
+          final ninoId = state.pathParameters['ninoId'] ?? '1';
+          return TherapeuticPlanScreen(ninoId: ninoId);
         },
       ),
       GoRoute(
@@ -93,8 +132,22 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const IAAssistantScreen(),
       ),
       GoRoute(
+        path: '/terapeuta/ia/:ninoId',
+        builder: (context, state) {
+          final ninoId = state.pathParameters['ninoId'] ?? '1';
+          return IAAssistantScreen(ninoId: ninoId);
+        },
+      ),
+      GoRoute(
         path: '/terapeuta/admision',
-        builder: (context, state) => const PatientAdmissionScreen(),
+        builder: (context, state) {
+          final ninoId = state.uri.queryParameters['ninoId'];
+          return PatientAdmissionScreen(ninoId: ninoId);
+        },
+      ),
+      GoRoute(
+        path: '/terapeuta/pendientes',
+        builder: (context, state) => const PendingPatientsScreen(),
       ),
       GoRoute(
         path: '/terapeuta/sesion',
@@ -108,6 +161,18 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         },
       ),
       GoRoute(
+        path: '/terapeuta/actividad/:actividadId',
+        builder: (context, state) {
+          final actividadId = state.pathParameters['actividadId'] ?? '';
+          return ActiveSessionScreen(
+            sesionId: actividadId,
+            actividadId: actividadId,
+            ninoId: state.uri.queryParameters['ninoId'],
+            planId: state.uri.queryParameters['planId'],
+          );
+        },
+      ),
+      GoRoute(
         path: '/terapeuta/sesion/resumen',
         builder: (context, state) {
           final extra = state.extra as Map<String, dynamic>? ?? {};
@@ -117,6 +182,9 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             segundosTranscurridos: extra['segundos'] as int? ?? 0,
             nivelAyuda: extra['nivelAyuda'] as String? ?? 'Ninguna',
             ninoNombre: extra['ninoNombre'] as String? ?? 'Paciente',
+            observaciones: extra['observaciones'] as String?,
+            ninoId: extra['ninoId'] as String?,
+            planId: extra['planId'] as String?,
           );
         },
       ),
@@ -140,7 +208,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: '/terapeuta/calendario',
-        builder: (context, state) => const _PlaceholderScreen(title: 'Calendario'),
+        builder: (context, state) =>
+            const _PlaceholderScreen(title: 'Calendario'),
       ),
 
       // ── Familia / Admin ────────────────────────────────────────────────────
@@ -196,7 +265,8 @@ class _PlaceholderScreen extends ConsumerWidget {
           children: [
             const Icon(Icons.construction, size: 64, color: Color(0xFF58423B)),
             const SizedBox(height: 16),
-            Text('$title — próximamente', style: const TextStyle(color: Color(0xFF58423B))),
+            Text('$title — próximamente',
+                style: const TextStyle(color: Color(0xFF58423B))),
             const SizedBox(height: 24),
             ElevatedButton(
               onPressed: () => context.go('/terapeuta/dashboard'),

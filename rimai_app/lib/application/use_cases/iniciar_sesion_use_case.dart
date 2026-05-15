@@ -27,6 +27,7 @@ class IniciarSesionUseCase {
         token: usuario.token!,
         role: usuario.rol ?? '',
         userId: usuario.id ?? '',
+        userName: usuario.nombreCompleto,
       );
     }
 

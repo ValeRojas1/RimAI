@@ -54,9 +54,9 @@ class RimAITopBar extends StatelessWidget implements PreferredSizeWidget {
                   ),
                 ],
               ),
-              if (trailingWidget != null) 
-                trailingWidget! 
-              else 
+              if (trailingWidget != null)
+                trailingWidget!
+              else
                 const CircleAvatar(
                   radius: 20,
                   backgroundColor: Color(0xFFE9E1D8),

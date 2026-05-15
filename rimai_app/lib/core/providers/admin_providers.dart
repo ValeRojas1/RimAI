@@ -2,8 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
-// Constante para base url, misma que auth_repository_adapter
-const String _kBaseUrl = 'http://192.168.18.12:8000';
+import 'package:rimai_app/core/constants/api_constants.dart';
 
 class UsuarioAdmin {
   final String id;
@@ -72,14 +71,18 @@ class AdminService {
     return data.map((json) => UsuarioAdmin.fromJson(json)).toList();
   }
 
-  Future<void> crearUsuario(String nombre, String email, String password, String rol, {String? especialidad, String? colegiatura}) async {
+  Future<void> crearUsuario(
+      String nombre, String email, String password, String rol,
+      {String? especialidad, String? colegiatura}) async {
     await _dio.post('/api/admin/usuarios', data: {
       'nombre': nombre,
       'email': email,
       'password': password,
       'rol': rol,
-      if (especialidad != null && especialidad.isNotEmpty) 'especialidad': especialidad,
-      if (colegiatura != null && colegiatura.isNotEmpty) 'colegiatura': colegiatura,
+      if (especialidad != null && especialidad.isNotEmpty)
+        'especialidad': especialidad,
+      if (colegiatura != null && colegiatura.isNotEmpty)
+        'colegiatura': colegiatura,
     });
   }
 
@@ -94,7 +97,8 @@ class AdminService {
       await _dio.delete('/api/admin/usuarios/$id');
     } on DioException catch (e) {
       if (e.response != null && e.response?.statusCode == 409) {
-        throw Exception(e.response?.data['detail'] ?? 'No se puede eliminar el usuario');
+        throw Exception(
+            e.response?.data['detail'] ?? 'No se puede eliminar el usuario');
       }
       rethrow;
     }
@@ -104,7 +108,7 @@ class AdminService {
 final _adminDioProvider = Provider<Dio>((ref) {
   const storage = FlutterSecureStorage();
   final dio = Dio(BaseOptions(
-    baseUrl: _kBaseUrl,
+    baseUrl: ApiConstants.baseUrl,
     connectTimeout: const Duration(seconds: 10),
     receiveTimeout: const Duration(seconds: 10),
     headers: {'Content-Type': 'application/json'},
@@ -130,6 +134,7 @@ final listaUsuariosProvider = FutureProvider<List<UsuarioAdmin>>((ref) async {
   return ref.read(adminServiceProvider).listarUsuarios();
 });
 
-final estadisticasAdminProvider = FutureProvider<AdminEstadisticas>((ref) async {
+final estadisticasAdminProvider =
+    FutureProvider<AdminEstadisticas>((ref) async {
   return ref.read(adminServiceProvider).obtenerEstadisticas();
 });

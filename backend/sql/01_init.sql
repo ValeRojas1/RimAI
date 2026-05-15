@@ -21,7 +21,7 @@ CREATE TABLE usuarios (
 -- Terapeutas (extiende usuarios)
 CREATE TABLE terapeutas (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    usuario_id UUID NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+    usuario_id UUID NOT NULL UNIQUE REFERENCES usuarios(id) ON DELETE CASCADE,
     especialidad VARCHAR(150),
     colegiatura VARCHAR(50)
 );
@@ -29,7 +29,7 @@ CREATE TABLE terapeutas (
 -- Padres / tutores
 CREATE TABLE padres_tutores (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    usuario_id UUID NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+    usuario_id UUID NOT NULL UNIQUE REFERENCES usuarios(id) ON DELETE CASCADE,
     telefono VARCHAR(20)
 );
 
@@ -43,7 +43,9 @@ CREATE TABLE ninos (
     nivel_cognitivo nivel_cognitivo NOT NULL,
     perfil_sensorial JSONB,
     objetivos_intervencion TEXT[],
-    terapeuta_id UUID NOT NULL REFERENCES terapeutas(id),
+    diagnostico VARCHAR(200),
+    documento_diagnostico VARCHAR(255),
+    terapeuta_id UUID REFERENCES terapeutas(id),
     tutor_id UUID REFERENCES padres_tutores(id),
     activo BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMPTZ DEFAULT NOW()
@@ -66,6 +68,7 @@ CREATE TABLE actividades (
 -- Planes terapéuticos
 CREATE TABLE planes_terapeuticos (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    nombre VARCHAR(200) NOT NULL DEFAULT 'Plan terapeutico activo',
     nino_id UUID NOT NULL REFERENCES ninos(id),
     terapeuta_id UUID NOT NULL REFERENCES terapeutas(id),
     fecha_inicio DATE NOT NULL,
@@ -107,6 +110,8 @@ CREATE TABLE resultados_actividad (
     aciertos INT,
     repeticiones INT,
     nivel_ayuda_requerido INT DEFAULT 0,
+    nivel_dificultad_usado nivel_dificultad DEFAULT 'Medio',
+    observaciones TEXT,
     emocion_detectada VARCHAR(50),
     confianza_emocion FLOAT,
     timestamp TIMESTAMPTZ DEFAULT NOW()
@@ -118,3 +123,13 @@ CREATE INDEX idx_sesiones_nino ON sesiones(nino_id);
 CREATE INDEX idx_sesiones_plan ON sesiones(plan_id);
 CREATE INDEX idx_resultados_sesion ON resultados_actividad(sesion_id);
 CREATE INDEX idx_planes_nino ON planes_terapeuticos(nino_id);
+
+CREATE TABLE decisiones_clinicas (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    terapeuta_id UUID NOT NULL REFERENCES terapeutas(id),
+    nino_id UUID REFERENCES ninos(id),
+    recomendacion_id VARCHAR(120) NOT NULL,
+    accion VARCHAR(40) NOT NULL,
+    observacion TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);

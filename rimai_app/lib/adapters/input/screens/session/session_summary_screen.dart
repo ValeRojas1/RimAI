@@ -6,10 +6,10 @@ import 'package:rimai_app/adapters/input/widgets/rimai_top_bar.dart';
 import 'package:rimai_app/adapters/input/widgets/bento_card.dart';
 
 const _kPrimary = Color(0xFFA43714);
-const _kAction  = Color(0xFFB8D6B2);
-const _kBg      = Color(0xFFFFF8F2);
+const _kAction = Color(0xFFB8D6B2);
+const _kBg = Color(0xFFFFF8F2);
 const _kSurface = Color(0xFFFAF2E9);
-const _kText    = Color(0xFF1E1B16);
+const _kText = Color(0xFF1E1B16);
 const _kSubtext = Color(0xFF58423B);
 
 class SessionSummaryScreen extends ConsumerWidget {
@@ -18,6 +18,9 @@ class SessionSummaryScreen extends ConsumerWidget {
   final int segundosTranscurridos;
   final String nivelAyuda;
   final String ninoNombre;
+  final String? observaciones;
+  final String? ninoId;
+  final String? planId;
 
   const SessionSummaryScreen({
     super.key,
@@ -26,6 +29,9 @@ class SessionSummaryScreen extends ConsumerWidget {
     required this.segundosTranscurridos,
     required this.nivelAyuda,
     this.ninoNombre = 'Paciente',
+    this.observaciones,
+    this.ninoId,
+    this.planId,
   });
 
   @override
@@ -39,10 +45,16 @@ class SessionSummaryScreen extends ConsumerWidget {
 
     final minutos = (segundosTranscurridos / 60).floor();
     final segundos = segundosTranscurridos % 60;
-    final tiempoStr = '${minutos.toString().padLeft(2, '0')}:${segundos.toString().padLeft(2, '0')}';
+    final tiempoStr =
+        '${minutos.toString().padLeft(2, '0')}:${segundos.toString().padLeft(2, '0')}';
 
-    final nivelRecomendado = tasa >= 0.85 ? 'Medio' : tasa >= 0.5 ? 'Bajo' : 'Bajo';
-    final nivelLabel = tasa >= 0.85 ? '↑ Aumentar dificultad' : 'Mantener nivel actual';
+    final nivelRecomendado = tasa >= 0.85
+        ? 'Medio'
+        : tasa >= 0.5
+            ? 'Bajo'
+            : 'Bajo';
+    final nivelLabel =
+        tasa >= 0.85 ? '↑ Aumentar dificultad' : 'Mantener nivel actual';
 
     return Scaffold(
       backgroundColor: _kBg,
@@ -59,7 +71,9 @@ class SessionSummaryScreen extends ConsumerWidget {
       body: SingleChildScrollView(
         padding: EdgeInsets.only(
           top: 96 + MediaQuery.of(context).padding.top,
-          left: 24, right: 24, bottom: 48,
+          left: 24,
+          right: 24,
+          bottom: 48,
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -114,15 +128,58 @@ class SessionSummaryScreen extends ConsumerWidget {
             const SizedBox(height: 24),
 
             // ── Métricas ────────────────────────────────────────────────────
-            Row(
-              children: [
-                Expanded(child: _MetricTile(label: 'ACIERTOS', value: '$totalAciertos / $totalIntentos')),
-                const SizedBox(width: 16),
-                Expanded(child: _MetricTile(label: 'DURACIÓN', value: tiempoStr)),
-                const SizedBox(width: 16),
-                Expanded(child: _MetricTile(label: 'AYUDA', value: nivelAyuda)),
-              ],
+            LayoutBuilder(
+              builder: (context, metricConstraints) {
+                final metricTiles = [
+                  _MetricTile(
+                      label: 'ACIERTOS',
+                      value: '$totalAciertos / $totalIntentos'),
+                  _MetricTile(label: 'DURACIÓN', value: tiempoStr),
+                  _MetricTile(label: 'AYUDA', value: nivelAyuda),
+                ];
+
+                if (metricConstraints.maxWidth < 520) {
+                  return Column(
+                    children: metricTiles
+                        .map((tile) => Padding(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: tile,
+                            ))
+                        .toList(),
+                  );
+                }
+
+                return Row(
+                  children: [
+                    Expanded(child: metricTiles[0]),
+                    const SizedBox(width: 16),
+                    Expanded(child: metricTiles[1]),
+                    const SizedBox(width: 16),
+                    Expanded(child: metricTiles[2]),
+                  ],
+                );
+              },
             ),
+            if (observaciones != null && observaciones!.isNotEmpty) ...[
+              const SizedBox(height: 24),
+              BentoCard(
+                backgroundColor: Colors.white,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('OBSERVACIONES',
+                        style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            color: _kSubtext,
+                            letterSpacing: 1)),
+                    const SizedBox(height: 8),
+                    Text(observaciones!,
+                        style: const TextStyle(color: _kText, height: 1.4)),
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 24),
 
             // ── Recomendación IA-01 ─────────────────────────────────────────
@@ -133,17 +190,25 @@ class SessionSummaryScreen extends ConsumerWidget {
                 children: [
                   const Text(
                     'RECOMENDACIÓN IA-01',
-                    style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFFCFE9CF), letterSpacing: 1),
+                    style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFFCFE9CF),
+                        letterSpacing: 1),
                   ),
                   const SizedBox(height: 8),
                   Text(
                     'Nivel recomendado: $nivelRecomendado',
-                    style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white),
+                    style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white),
                   ),
                   const SizedBox(height: 8),
                   Text(
                     nivelLabel,
-                    style: const TextStyle(color: Color(0xFFB3CDB4), fontSize: 14),
+                    style:
+                        const TextStyle(color: Color(0xFFB3CDB4), fontSize: 14),
                   ),
                 ],
               ),
@@ -154,15 +219,19 @@ class SessionSummaryScreen extends ConsumerWidget {
             SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
-                onPressed: () => context.go('/terapeuta/ia'),
-                icon: const Icon(Icons.auto_awesome),
-                label: const Text('Ver Asistente IA'),
+                onPressed: () => ninoId == null
+                    ? context.go('/terapeuta/dashboard')
+                    : context.go('/terapeuta/plan/$ninoId'),
+                icon: const Icon(Icons.add_circle_outline),
+                label: const Text('Nueva actividad'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: _kAction,
                   foregroundColor: _kText,
                   padding: const EdgeInsets.symmetric(vertical: 18),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                  textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16)),
+                  textStyle: const TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 16),
                 ),
               ),
             ),
@@ -172,13 +241,15 @@ class SessionSummaryScreen extends ConsumerWidget {
               child: OutlinedButton.icon(
                 onPressed: () => context.go('/terapeuta/dashboard'),
                 icon: const Icon(Icons.home_rounded),
-                label: const Text('Volver al Dashboard'),
+                label: const Text('Finalizar sesion'),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: _kSubtext,
                   side: const BorderSide(color: Color(0xFFDFC0B7)),
                   padding: const EdgeInsets.symmetric(vertical: 18),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                  textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16)),
+                  textStyle: const TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 16),
                 ),
               ),
             ),
@@ -203,9 +274,24 @@ class _MetricTile extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: _kSubtext, letterSpacing: 1)),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+                color: _kSubtext,
+                letterSpacing: 1),
+          ),
           const SizedBox(height: 8),
-          Text(value, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: _kText)),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(value,
+                style: const TextStyle(
+                    fontSize: 22, fontWeight: FontWeight.w900, color: _kText)),
+          ),
         ],
       ),
     );

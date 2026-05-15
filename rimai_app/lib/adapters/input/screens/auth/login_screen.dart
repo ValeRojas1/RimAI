@@ -58,14 +58,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
     try {
       final useCase = ref.read(iniciarSesionUseCaseProvider);
-      
+
       final usuario = await useCase.ejecutar(
         correo: _emailController.text.trim(),
         contrasena: _passController.text,
       );
 
       if (!mounted) return;
-      
+
       // La navegación automática debe ser gestionada por el enrutador
       // dependiendo del rol depositado en AuthStorageService.
       // Pero forzamos a GoRouter a refrescar evaluando nuevamente la ruta.
@@ -76,11 +76,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       } else {
         context.go('/familia/dashboard');
       }
-      
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _errorMessage = e.toString().replaceFirst('Exception: ', '').replaceFirst('ArgumentError: ', '');
+        _errorMessage = e
+            .toString()
+            .replaceFirst('Exception: ', '')
+            .replaceFirst('ArgumentError: ', '');
       });
     } finally {
       if (mounted) setState(() => _isLoading = false);
@@ -152,7 +154,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         ),
         onPressed: () {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Recuperar contraseña - próximamente')),
+            const SnackBar(
+                content: Text('Recuperar contraseña - próximamente')),
           );
         },
         child: Text(
@@ -193,7 +196,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         iconAlignment: IconAlignment.end,
         style: ElevatedButton.styleFrom(
           backgroundColor: const Color(0xFFB8D6B2),
-          disabledBackgroundColor: const Color(0xFFB8D6B2).withValues(alpha: 0.6),
+          disabledBackgroundColor:
+              const Color(0xFFB8D6B2).withValues(alpha: 0.6),
           elevation: 0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(9999),
@@ -203,7 +207,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             if (states.contains(WidgetState.hovered)) return 8;
             return 4;
           }),
-          shadowColor: WidgetStateProperty.all(const Color(0xFFB8D6B2).withValues(alpha: 0.3)),
+          shadowColor: WidgetStateProperty.all(
+              const Color(0xFFB8D6B2).withValues(alpha: 0.3)),
         ),
       ),
     );
@@ -212,7 +217,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   Widget _buildDivider() {
     return Row(
       children: [
-        Expanded(child: Divider(color: const Color(0xFFEAE4DC).withValues(alpha: 0.5), thickness: 1)),
+        Expanded(
+            child: Divider(
+                color: const Color(0xFFEAE4DC).withValues(alpha: 0.5),
+                thickness: 1)),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Text(
@@ -225,7 +233,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             ),
           ),
         ),
-        Expanded(child: Divider(color: const Color(0xFFEAE4DC).withValues(alpha: 0.5), thickness: 1)),
+        Expanded(
+            child: Divider(
+                color: const Color(0xFFEAE4DC).withValues(alpha: 0.5),
+                thickness: 1)),
       ],
     );
   }
@@ -236,7 +247,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       children: [
         _socialButton(
           context: context,
-          iconData: Icons.g_mobiledata, // Fallback icon instead of pure SVG to avoid adding flutter_svg
+          iconData: Icons
+              .g_mobiledata, // Fallback icon instead of pure SVG to avoid adding flutter_svg
           color: const Color(0xFF4285F4),
         ),
         const SizedBox(width: 16),
@@ -249,7 +261,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     );
   }
 
-  Widget _socialButton({required BuildContext context, required IconData iconData, required Color color}) {
+  Widget _socialButton(
+      {required BuildContext context,
+      required IconData iconData,
+      required Color color}) {
     return InkWell(
       onTap: () {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -262,7 +277,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         height: 48,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          border: Border.all(color: const Color(0xFFD9C5BF).withValues(alpha: 0.5)),
+          border:
+              Border.all(color: const Color(0xFFD9C5BF).withValues(alpha: 0.5)),
         ),
         child: Center(
           child: Icon(iconData, size: 28, color: color),

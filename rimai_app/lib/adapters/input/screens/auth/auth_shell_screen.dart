@@ -48,7 +48,8 @@ class AuthShellScreen extends StatelessWidget {
                               const SizedBox(width: 32),
                               Expanded(
                                 flex: 6,
-                                child: _buildFormCard(context, activeTab, location),
+                                child: _buildFormCard(
+                                    context, activeTab, location),
                               ),
                             ],
                           ),
@@ -71,7 +72,8 @@ class AuthShellScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildFormCard(BuildContext context, AuthTab activeTab, String location) {
+  Widget _buildFormCard(
+      BuildContext context, AuthTab activeTab, String location) {
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFFFFFFFF),

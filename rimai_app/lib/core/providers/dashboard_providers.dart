@@ -1,28 +1,27 @@
 import 'dart:convert';
 
-import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:dio/dio.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
-// ── Base URL ──────────────────────────────────────────────────────────────────
-// Dispositivo físico con USB: usa 'adb reverse tcp:8000 tcp:8000' y deja localhost
-// Emulador Android: cambia a 10.0.2.2
-const String _kBaseUrl = 'http://192.168.18.12:8000'; // <- Modificado a tu IP local
+import 'package:rimai_app/core/constants/api_constants.dart';
 
-// ── Helpers de parsing seguros ────────────────────────────────────────────────
+class SessionExpiredException implements Exception {
+  final String message;
+  const SessionExpiredException(
+      [this.message = 'Sesion expirada. Por favor inicia sesion de nuevo.']);
 
-/// Convierte la respuesta de Dio a Map<String, dynamic> de forma segura.
-/// Maneja respuestas ya decodificadas (Map) y sin decodificar (String).
+  @override
+  String toString() => message;
+}
+
 Map<String, dynamic> _toMap(dynamic raw) {
   if (raw is Map<String, dynamic>) return raw;
   if (raw is Map) return raw.cast<String, dynamic>();
   if (raw is String) return jsonDecode(raw) as Map<String, dynamic>;
   throw Exception(
-    'Respuesta inesperada del servidor. Tipo: ${raw.runtimeType}',
-  );
+      'Respuesta inesperada del servidor. Tipo: ${raw.runtimeType}');
 }
-
-// ── Modelos ───────────────────────────────────────────────────────────────────
 
 class UltimaSesion {
   final DateTime? fecha;
@@ -34,9 +33,8 @@ class UltimaSesion {
   factory UltimaSesion.fromJson(dynamic raw) {
     final j = _toMap(raw);
     return UltimaSesion(
-      fecha: j['fecha'] != null
-          ? DateTime.tryParse(j['fecha'].toString())
-          : null,
+      fecha:
+          j['fecha'] != null ? DateTime.tryParse(j['fecha'].toString()) : null,
       tasaAciertos: j['tasa_aciertos'] != null
           ? (j['tasa_aciertos'] as num).toDouble()
           : null,
@@ -51,7 +49,9 @@ class PacienteDashboard {
   final int edad;
   final String nivelCognitivo;
   final String? planActivo;
+  final String? planActivoId;
   final UltimaSesion? ultimaSesion;
+  final String estadoClinico;
 
   PacienteDashboard({
     required this.id,
@@ -59,7 +59,9 @@ class PacienteDashboard {
     required this.edad,
     required this.nivelCognitivo,
     this.planActivo,
+    this.planActivoId,
     this.ultimaSesion,
+    this.estadoClinico = 'pendiente_asignacion',
   });
 
   factory PacienteDashboard.fromJson(dynamic raw) {
@@ -70,20 +72,26 @@ class PacienteDashboard {
       edad: (j['edad'] as num?)?.toInt() ?? 0,
       nivelCognitivo: j['nivel_cognitivo']?.toString() ?? '',
       planActivo: j['plan_activo']?.toString(),
+      planActivoId: j['plan_activo_id']?.toString(),
       ultimaSesion: j['ultima_sesion'] != null
           ? UltimaSesion.fromJson(j['ultima_sesion'])
           : null,
+      estadoClinico: j['estado_clinico']?.toString() ?? 'pendiente_asignacion',
     );
   }
 }
 
 class DashboardData {
+  final String? terapeutaId;
+  final String? terapeutaNombre;
   final int totalPacientes;
   final int sesionesEstaSemana;
   final int alertasBajaAdherencia;
   final List<PacienteDashboard> pacientes;
 
   DashboardData({
+    this.terapeutaId,
+    this.terapeutaNombre,
     required this.totalPacientes,
     required this.sesionesEstaSemana,
     required this.alertasBajaAdherencia,
@@ -93,6 +101,8 @@ class DashboardData {
   factory DashboardData.fromJson(dynamic raw) {
     final j = _toMap(raw);
     return DashboardData(
+      terapeutaId: j['terapeuta_id']?.toString(),
+      terapeutaNombre: j['terapeuta_nombre']?.toString(),
       totalPacientes: (j['total_pacientes'] as num?)?.toInt() ?? 0,
       sesionesEstaSemana: (j['sesiones_esta_semana'] as num?)?.toInt() ?? 0,
       alertasBajaAdherencia:
@@ -104,27 +114,51 @@ class DashboardData {
           : [],
     );
   }
+}
 
-  /// Datos de demostración cuando el backend no está disponible.
-  static DashboardData mock() => DashboardData(
-        totalPacientes: 1,
-        sesionesEstaSemana: 3,
-        alertasBajaAdherencia: 0,
-        pacientes: [
-          PacienteDashboard(
-            id: 'mock-nino-001',
-            nombre: 'Lucas Mendoza',
-            edad: 7,
-            nivelCognitivo: 'Medio',
-            planActivo: 'plan-001',
-            ultimaSesion: UltimaSesion(
-              fecha: DateTime.now().subtract(const Duration(days: 3)),
-              tasaAciertos: 0.76,
-              estado: 'completada',
-            ),
-          ),
-        ],
-      );
+
+// ── Niño pendiente (bandeja del terapeuta) ───────────────────────────────────
+class NinoPendiente {
+  final String id;
+  final String nombre;
+  final int edad;
+  final String estadoClinico;
+  final DateTime fechaRegistro;
+  final String? diagnostico;
+  final String? comunicacion;
+  final List<String> intereses;
+  final String? tutorNombre;
+
+  NinoPendiente({
+    required this.id,
+    required this.nombre,
+    required this.edad,
+    required this.estadoClinico,
+    required this.fechaRegistro,
+    this.diagnostico,
+    this.comunicacion,
+    this.intereses = const [],
+    this.tutorNombre,
+  });
+
+  factory NinoPendiente.fromJson(dynamic raw) {
+    final j = _toMap(raw);
+    return NinoPendiente(
+      id: j['id']?.toString() ?? '',
+      nombre: j['nombre']?.toString() ?? '',
+      edad: (j['edad'] as num?)?.toInt() ?? 0,
+      estadoClinico: j['estado_clinico']?.toString() ?? 'pendiente_asignacion',
+      fechaRegistro: j['fecha_registro'] != null
+          ? DateTime.tryParse(j['fecha_registro'].toString()) ?? DateTime.now()
+          : DateTime.now(),
+      diagnostico: j['diagnostico']?.toString(),
+      comunicacion: j['comunicacion']?.toString(),
+      intereses: j['intereses'] is List
+          ? (j['intereses'] as List).map((e) => e.toString()).toList()
+          : [],
+      tutorNombre: j['tutor_nombre']?.toString(),
+    );
+  }
 }
 
 class ActividadPlan {
@@ -151,7 +185,7 @@ class ActividadPlan {
       nombre: j['nombre']?.toString() ?? '',
       tipo: j['tipo']?.toString() ?? '',
       instrucciones: j['instrucciones']?.toString(),
-      nivelDificultad: j['nivel_dificultad']?.toString() ?? '',
+      nivelDificultad: j['nivel_dificultad']?.toString() ?? 'Medio',
       duracionEstimada: (j['duracion_estimada'] as num?)?.toInt(),
     );
   }
@@ -159,11 +193,17 @@ class ActividadPlan {
 
 class PlanData {
   final String id;
+  final String nombre;
+  final String ninoId;
+  final String ninoNombre;
   final String nivelDificultadActual;
   final List<ActividadPlan> actividades;
 
   PlanData({
     required this.id,
+    required this.nombre,
+    required this.ninoId,
+    required this.ninoNombre,
     required this.nivelDificultadActual,
     required this.actividades,
   });
@@ -172,7 +212,11 @@ class PlanData {
     final j = _toMap(raw);
     return PlanData(
       id: j['id']?.toString() ?? '',
-      nivelDificultadActual: j['nivel_dificultad_actual']?.toString() ?? '',
+      nombre: j['nombre']?.toString() ?? 'Plan terapeutico',
+      ninoId: j['nino_id']?.toString() ?? '',
+      ninoNombre: j['nino_nombre']?.toString() ?? 'Paciente',
+      nivelDificultadActual:
+          j['nivel_dificultad_actual']?.toString() ?? 'Medio',
       actividades: j['actividades'] is List
           ? (j['actividades'] as List)
               .map((a) => ActividadPlan.fromJson(a))
@@ -181,8 +225,6 @@ class PlanData {
     );
   }
 }
-
-// ── Servicio ──────────────────────────────────────────────────────────────────
 
 class DashboardService {
   DashboardService(this._dio);
@@ -194,18 +236,13 @@ class DashboardService {
       final response = await _dio.get('/api/dashboard/resumen');
       return DashboardData.fromJson(response.data);
     } on DioException catch (e) {
-      // Si no hay backend (conexión rechazada), usa datos mock para demo
-      if (e.type == DioExceptionType.connectionError ||
-          e.type == DioExceptionType.unknown) {
-        return DashboardData.mock();
-      }
+      if (e.response?.statusCode == 401) throw const SessionExpiredException();
       rethrow;
     }
   }
 
   Future<PlanData> obtenerPlanActivo(String ninoId) async {
-    final response =
-        await _dio.get('/api/dashboard/paciente/$ninoId/plan');
+    final response = await _dio.get('/api/ninos/$ninoId/plan');
     return PlanData.fromJson(response.data);
   }
 
@@ -214,24 +251,28 @@ class DashboardService {
       final response = await _dio.get('/api/dashboard/familia/resumen');
       return DashboardData.fromJson(response.data);
     } on DioException catch (e) {
-      if (e.type == DioExceptionType.connectionError ||
-          e.type == DioExceptionType.unknown) {
-        return DashboardData.mock();
-      }
+      if (e.response?.statusCode == 401) throw const SessionExpiredException();
       rethrow;
     }
   }
 
-  Future<void> guardarPerfilNino(Map<String, dynamic> datos) async {
-    await _dio.post('/api/dashboard/familia/paciente', data: datos);
+  Future<Map<String, dynamic>> guardarPerfilNino(Map<String, dynamic> datos) async {
+    try {
+      final response = await _dio.post('/api/dashboard/familia/paciente', data: datos);
+      return (response.data as Map).cast<String, dynamic>();
+    } on DioException catch (e) {
+      throw Exception(e.response?.data?['detail'] ?? 'Error al registrar el paciente.');
+    }
   }
 
   Future<void> vincularPaciente(Map<String, dynamic> datos) async {
     try {
-      await _dio.post('/api/dashboard/terapeuta/vincular-paciente', data: datos);
-    } catch (e) {
-      if (e is DioException && e.response != null && (e.response?.statusCode == 404 || e.response?.statusCode == 409)) {
-        throw Exception(e.response?.data['detail'] ?? 'Error al vincular el paciente.');
+      await _dio.post('/api/dashboard/terapeuta/vincular-paciente',
+          data: datos);
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 404 || e.response?.statusCode == 409) {
+        throw Exception(
+            e.response?.data['detail'] ?? 'Error al vincular el paciente.');
       }
       rethrow;
     }
@@ -239,27 +280,59 @@ class DashboardService {
 
   Future<Map<String, dynamic>> generarPlanIA(String ninoId) async {
     try {
-      final response = await _dio.post('/api/dashboard/paciente/$ninoId/plan/generar');
-      return response.data;
-    } catch (e) {
-      if (e is DioException && e.response != null) {
-        throw Exception(e.response?.data['detail'] ?? 'Error al generar plan con IA.');
+      final response =
+          await _dio.post('/api/dashboard/paciente/$ninoId/plan/generar');
+      return (response.data as Map).cast<String, dynamic>();
+    } on DioException catch (e) {
+      final detail = e.response?.data?['detail'];
+      if (detail is Map) {
+        // 422 — perfil no listo (detail es un dict estructurado)
+        throw Exception(
+            detail['mensaje'] as String? ?? 'El perfil no está listo para generar el plan.');
       }
+      throw Exception(detail?.toString() ?? 'Error al generar plan con IA.');
+    }
+  }
+
+  Future<List<NinoPendiente>> obtenerPendientes() async {
+    try {
+      final response = await _dio.get('/api/dashboard/terapeuta/pendientes');
+      final list = response.data as List? ?? [];
+      return list.map((e) => NinoPendiente.fromJson(e)).toList();
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 401) throw const SessionExpiredException();
       rethrow;
     }
   }
-}
 
-// ── Providers ─────────────────────────────────────────────────────────────────
+  Future<Map<String, dynamic>> vincularPorId(String ninoId) async {
+    try {
+      final response = await _dio.post('/api/dashboard/terapeuta/vincular/$ninoId');
+      return (response.data as Map).cast<String, dynamic>();
+    } on DioException catch (e) {
+      throw Exception(e.response?.data?['detail'] ?? 'Error al vincular el paciente.');
+    }
+  }
+
+  Future<Map<String, dynamic>> completarPerfilClinico(
+      String ninoId, Map<String, dynamic> datos) async {
+    try {
+      final response = await _dio.patch('/api/ninos/$ninoId/perfil-clinico', data: datos);
+      return (response.data as Map).cast<String, dynamic>();
+    } on DioException catch (e) {
+      throw Exception(e.response?.data?['detail'] ?? 'Error al guardar el perfil clínico.');
+    }
+  }
+}
 
 final _secureStorageProvider2 = Provider<FlutterSecureStorage>(
   (_) => const FlutterSecureStorage(),
 );
 
-final _dioProvider = Provider<Dio>((ref) {
+final dioProvider = Provider<Dio>((ref) {
   final storage = ref.read(_secureStorageProvider2);
   final dio = Dio(BaseOptions(
-    baseUrl: _kBaseUrl,
+    baseUrl: ApiConstants.baseUrl,
     connectTimeout: const Duration(seconds: 10),
     receiveTimeout: const Duration(seconds: 10),
     headers: {'Content-Type': 'application/json'},
@@ -273,7 +346,13 @@ final _dioProvider = Provider<Dio>((ref) {
       }
       handler.next(options);
     },
-    onError: (error, handler) {
+    onError: (error, handler) async {
+      if (error.response?.statusCode == 401) {
+        await storage.delete(key: 'jwt_token');
+        await storage.delete(key: 'user_role');
+        await storage.delete(key: 'user_id');
+        await storage.delete(key: 'user_name');
+      }
       handler.next(error);
     },
   ));
@@ -281,19 +360,23 @@ final _dioProvider = Provider<Dio>((ref) {
 });
 
 final dashboardServiceProvider = Provider<DashboardService>((ref) {
-  final dio = ref.read(_dioProvider);
-  return DashboardService(dio);
+  return DashboardService(ref.read(dioProvider));
 });
 
-final dashboardProvider = FutureProvider<DashboardData>((ref) async {
+final dashboardProvider = FutureProvider.autoDispose<DashboardData>((ref) async {
   return ref.read(dashboardServiceProvider).obtenerResumen();
 });
 
-final familiaDashboardProvider = FutureProvider<DashboardData>((ref) async {
+final familiaDashboardProvider = FutureProvider.autoDispose<DashboardData>((ref) async {
   return ref.read(dashboardServiceProvider).obtenerResumenFamilia();
 });
 
 final planActivoProvider =
-    FutureProvider.family<PlanData, String>((ref, ninoId) {
+    FutureProvider.autoDispose.family<PlanData, String>((ref, ninoId) {
   return ref.read(dashboardServiceProvider).obtenerPlanActivo(ninoId);
+});
+
+/// Bandeja de espera: niños sin terapeuta asignado visibles para cualquier terapeuta.
+final pendientesProvider = FutureProvider.autoDispose<List<NinoPendiente>>((ref) async {
+  return ref.read(dashboardServiceProvider).obtenerPendientes();
 });

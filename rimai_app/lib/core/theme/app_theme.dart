@@ -46,7 +46,7 @@ class PMV2Theme {
         brightness: Brightness.light,
       ),
       scaffoldBackgroundColor: PMV2Colors.surface,
-      textTheme: GoogleFonts.plusJakartaSansTextTheme().apply(
+      textTheme: GoogleFonts.interTextTheme().apply(
         bodyColor: PMV2Colors.onSurface,
         displayColor: PMV2Colors.onSurface,
       ),

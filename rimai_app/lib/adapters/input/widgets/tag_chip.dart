@@ -22,14 +22,16 @@ class TagChip extends StatelessWidget {
         decoration: BoxDecoration(
           color: isSelected ? const Color(0xFFB8D6B2) : const Color(0xFFFFFFFF),
           borderRadius: BorderRadius.circular(100),
-          border: isSelected 
-            ? null 
-            : Border.all(color: const Color(0xFFDFC0B7), width: 1),
+          border: isSelected
+              ? null
+              : Border.all(color: const Color(0xFFDFC0B7), width: 1),
         ),
         child: Text(
           label,
           style: TextStyle(
-            color: isSelected ? const Color(0xFF1E1B16) : const Color(0xFF58423B).withOpacity(0.7),
+            color: isSelected
+                ? const Color(0xFF1E1B16)
+                : const Color(0xFF58423B).withOpacity(0.7),
             fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
             fontSize: 14,
           ),
