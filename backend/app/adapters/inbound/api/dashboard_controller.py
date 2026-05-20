@@ -305,10 +305,13 @@ def vincular_paciente_por_email(
             cur.execute(
                 """
                 UPDATE ninos
-                SET terapeuta_id = %s, estado_clinico = 'en_evaluacion'
+                SET terapeuta_id = %s,
+                    estado_clinico = 'perfil_clinico_incompleto',
+                    vinculado_por = %s,
+                    vinculado_at = NOW()
                 WHERE id = %s
                 """,
-                (ter["id"], nino["id"]),
+                (ter["id"], ter["id"], nino["id"]),
             )
 
     return {"ok": True, "nino_id": str(nino["id"])}
@@ -345,10 +348,13 @@ def vincular_paciente_por_id(
             cur.execute(
                 """
                 UPDATE ninos
-                SET terapeuta_id = %s, estado_clinico = 'en_evaluacion'
+                SET terapeuta_id = %s,
+                    estado_clinico = 'perfil_clinico_incompleto',
+                    vinculado_por = %s,
+                    vinculado_at = NOW()
                 WHERE id = %s
                 """,
-                (ter["id"], nino["id"]),
+                (ter["id"], ter["id"], nino["id"]),
             )
 
     return {"ok": True, "nino_id": nino_id}

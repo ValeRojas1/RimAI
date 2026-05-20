@@ -40,8 +40,7 @@ class AuthRepositoryAdapter implements AuthRepositoryPort {
         token: data['access_token'],
       );
     } on DioException catch (e) {
-      final message =
-          e.response?.data?['detail'] ?? 'Error de conexión con el servidor';
+      final message = _extractDetail(e);
       throw Exception('$message');
     }
   }
@@ -68,8 +67,7 @@ class AuthRepositoryAdapter implements AuthRepositoryPort {
       );
     } on DioException catch (e) {
       final statusCode = e.response?.statusCode;
-      final message =
-          e.response?.data?['detail'] ?? 'Error de conexión con el servidor';
+      final message = _extractDetail(e);
 
       if (statusCode == 401) {
         throw Exception('Email o contraseña incorrectos');
@@ -78,6 +76,22 @@ class AuthRepositoryAdapter implements AuthRepositoryPort {
       } else {
         throw Exception('$message');
       }
+    }
+  }
+
+  String _extractDetail(DioException e) {
+    try {
+      final data = e.response?.data;
+      if (data == null) return 'Error de conexión con el servidor';
+      if (data is Map) {
+        return data['detail']?.toString() ?? 'Error de conexión con el servidor';
+      }
+      if (data is String && data.length < 150) {
+        return data;
+      }
+      return 'Error de conexión con el servidor';
+    } catch (_) {
+      return 'Error de conexión con el servidor';
     }
   }
 }

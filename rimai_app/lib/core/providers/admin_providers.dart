@@ -97,8 +97,9 @@ class AdminService {
       await _dio.delete('/api/admin/usuarios/$id');
     } on DioException catch (e) {
       if (e.response != null && e.response?.statusCode == 409) {
-        throw Exception(
-            e.response?.data['detail'] ?? 'No se puede eliminar el usuario');
+        final data = e.response?.data;
+        final detail = (data is Map) ? data['detail']?.toString() : null;
+        throw Exception(detail ?? 'No se puede eliminar el usuario');
       }
       rethrow;
     }

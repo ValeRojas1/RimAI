@@ -256,12 +256,37 @@ class DashboardService {
     }
   }
 
+  String _extractDetail(DioException e, String defaultMsg) {
+    try {
+      final data = e.response?.data;
+      if (data == null) return defaultMsg;
+      if (data is Map) {
+        return data['detail']?.toString() ?? defaultMsg;
+      }
+      if (data is String) {
+        final trimmed = data.trim();
+        if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+          final decoded = jsonDecode(trimmed);
+          if (decoded is Map) {
+            return decoded['detail']?.toString() ?? defaultMsg;
+          }
+        }
+        if (data.length < 150) {
+          return data;
+        }
+      }
+      return defaultMsg;
+    } catch (_) {
+      return defaultMsg;
+    }
+  }
+
   Future<Map<String, dynamic>> guardarPerfilNino(Map<String, dynamic> datos) async {
     try {
       final response = await _dio.post('/api/dashboard/familia/paciente', data: datos);
       return (response.data as Map).cast<String, dynamic>();
     } on DioException catch (e) {
-      throw Exception(e.response?.data?['detail'] ?? 'Error al registrar el paciente.');
+      throw Exception(_extractDetail(e, 'Error al registrar el paciente.'));
     }
   }
 
@@ -271,8 +296,7 @@ class DashboardService {
           data: datos);
     } on DioException catch (e) {
       if (e.response?.statusCode == 404 || e.response?.statusCode == 409) {
-        throw Exception(
-            e.response?.data['detail'] ?? 'Error al vincular el paciente.');
+        throw Exception(_extractDetail(e, 'Error al vincular el paciente.'));
       }
       rethrow;
     }
@@ -290,7 +314,7 @@ class DashboardService {
         throw Exception(
             detail['mensaje'] as String? ?? 'El perfil no está listo para generar el plan.');
       }
-      throw Exception(detail?.toString() ?? 'Error al generar plan con IA.');
+      throw Exception(_extractDetail(e, 'Error al generar plan con IA.'));
     }
   }
 
@@ -310,7 +334,7 @@ class DashboardService {
       final response = await _dio.post('/api/dashboard/terapeuta/vincular/$ninoId');
       return (response.data as Map).cast<String, dynamic>();
     } on DioException catch (e) {
-      throw Exception(e.response?.data?['detail'] ?? 'Error al vincular el paciente.');
+      throw Exception(_extractDetail(e, 'Error al vincular el paciente.'));
     }
   }
 
@@ -320,7 +344,7 @@ class DashboardService {
       final response = await _dio.patch('/api/ninos/$ninoId/perfil-clinico', data: datos);
       return (response.data as Map).cast<String, dynamic>();
     } on DioException catch (e) {
-      throw Exception(e.response?.data?['detail'] ?? 'Error al guardar el perfil clínico.');
+      throw Exception(_extractDetail(e, 'Error al guardar el perfil clínico.'));
     }
   }
 }
