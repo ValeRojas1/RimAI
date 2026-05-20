@@ -19,7 +19,6 @@ class ProgressScreen extends ConsumerStatefulWidget {
 class _ProgressScreenState extends ConsumerState<ProgressScreen> {
   String _selectedPeriod = 'Esta semana';
   String _selectedSkill = 'Atención Conjunta';
-  bool _consentimientoActivo = true; // Simulado para IA-05
 
   @override
   Widget build(BuildContext context) {
@@ -207,16 +206,12 @@ class _ProgressScreenState extends ConsumerState<ProgressScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(flex: 2, child: _buildLineChartCard(metricas)),
-              const SizedBox(width: 24),
-              Expanded(child: _buildEmotionalChartCard()),
             ],
           );
         } else {
           return Column(
             children: [
               _buildLineChartCard(metricas),
-              const SizedBox(height: 24),
-              _buildEmotionalChartCard(),
               const SizedBox(height: 24),
               _buildSkillsBreakdownCard(metricas),
             ],
@@ -339,153 +334,6 @@ class _ProgressScreenState extends ConsumerState<ProgressScreen> {
             )
           ],
         ));
-  }
-
-  Widget _buildEmotionalChartCard() {
-    return BentoCard(
-      backgroundColor: const Color(0xFF4A624D),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text("MÓDULO IA-05",
-                  style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1,
-                      color: Color(0xFFCFE9CF))),
-              Switch(
-                value: _consentimientoActivo,
-                activeColor: const Color(0xFFB8D6B2),
-                onChanged: (val) => setState(() => _consentimientoActivo = val),
-              )
-            ],
-          ),
-          const SizedBox(height: 8),
-          const Text("Resumen Emocional",
-              style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white)),
-          const SizedBox(height: 24),
-          if (_consentimientoActivo) ...[
-            SizedBox(
-              height: 180,
-              child: BarChart(BarChartData(
-                  alignment: BarChartAlignment.spaceEvenly,
-                  maxY: 10,
-                  barTouchData: BarTouchData(enabled: false),
-                  titlesData: FlTitlesData(
-                    show: true,
-                    bottomTitles: AxisTitles(
-                      sideTitles: SideTitles(
-                        showTitles: true,
-                        getTitlesWidget: (value, meta) {
-                          const titles = [
-                            'Fel',
-                            'Neu',
-                            'Tri',
-                            'Eno',
-                            'Sor',
-                            'Mie'
-                          ];
-                          return Padding(
-                            padding: const EdgeInsets.only(top: 8),
-                            child: Text(titles[value.toInt()],
-                                style: const TextStyle(
-                                    color: Colors.white70, fontSize: 10)),
-                          );
-                        },
-                      ),
-                    ),
-                    leftTitles:
-                        AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                    topTitles:
-                        AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                    rightTitles:
-                        AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                  ),
-                  gridData: FlGridData(show: false),
-                  borderData: FlBorderData(show: false),
-                  barGroups: [
-                    BarChartGroupData(x: 0, barRods: [
-                      BarChartRodData(
-                          toY: 8,
-                          color: const Color(0xFFB8D6B2),
-                          width: 16,
-                          borderRadius: BorderRadius.circular(4))
-                    ]),
-                    BarChartGroupData(x: 1, barRods: [
-                      BarChartRodData(
-                          toY: 5,
-                          color: const Color(0xFFCFE9CF),
-                          width: 16,
-                          borderRadius: BorderRadius.circular(4))
-                    ]),
-                    BarChartGroupData(x: 2, barRods: [
-                      BarChartRodData(
-                          toY: 2,
-                          color: Colors.white38,
-                          width: 16,
-                          borderRadius: BorderRadius.circular(4))
-                    ]),
-                    BarChartGroupData(x: 3, barRods: [
-                      BarChartRodData(
-                          toY: 1,
-                          color: Colors.white38,
-                          width: 16,
-                          borderRadius: BorderRadius.circular(4))
-                    ]),
-                    BarChartGroupData(x: 4, barRods: [
-                      BarChartRodData(
-                          toY: 4,
-                          color: Colors.white60,
-                          width: 16,
-                          borderRadius: BorderRadius.circular(4))
-                    ]),
-                    BarChartGroupData(x: 5, barRods: [
-                      BarChartRodData(
-                          toY: 0,
-                          color: Colors.white38,
-                          width: 16,
-                          borderRadius: BorderRadius.circular(4))
-                    ]),
-                  ])),
-            ),
-            const SizedBox(height: 24),
-            Row(
-              children: const [
-                Icon(Icons.info_outline, size: 16, color: Color(0xFFB3CDB4)),
-                SizedBox(width: 8),
-                Expanded(
-                    child: Text("Este dato no constituye diagnóstico clínico.",
-                        style: TextStyle(
-                            fontSize: 12,
-                            fontStyle: FontStyle.italic,
-                            color: Color(0xFFB3CDB4)))),
-              ],
-            )
-          ] else ...[
-            Container(
-              padding: const EdgeInsets.all(24),
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: const Center(
-                child: Text(
-                  "Módulo inactivo. \nRequiere confirmación del tutor para recopilar e inferir métricas visuales.",
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Color(0xFFCFE9CF), height: 1.5),
-                ),
-              ),
-            )
-          ]
-        ],
-      ),
-    );
   }
 
   Widget _buildSkillsBreakdownCard(MetricasProgreso metricas) {

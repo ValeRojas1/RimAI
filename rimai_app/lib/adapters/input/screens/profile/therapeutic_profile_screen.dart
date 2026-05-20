@@ -4,7 +4,6 @@ import 'package:go_router/go_router.dart';
 import 'package:file_picker/file_picker.dart';
 
 import 'package:rimai_app/adapters/input/widgets/rimai_top_bar.dart';
-import 'package:rimai_app/adapters/input/widgets/rimai_bottom_nav.dart';
 import 'package:rimai_app/adapters/input/widgets/bento_card.dart';
 import 'package:rimai_app/adapters/input/widgets/tag_chip.dart';
 import 'package:rimai_app/adapters/input/widgets/interest_card.dart';
@@ -80,23 +79,11 @@ class _TherapeuticProfileScreenState
         title: "RimAI",
         leadingIcon: Icons.all_inclusive,
         iconColor: const Color(0xFFA43714),
-        trailingWidget: const CircleAvatar(
-          radius: 20,
-          backgroundColor: Color(0xFFFAF2E9),
-          child: Icon(Icons.person, color: Color(0xFF58423B)),
+        trailingWidget: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new, color: Color(0xFF58423B)),
+          tooltip: 'Volver al dashboard',
+          onPressed: () => context.go('/terapeuta/dashboard'),
         ),
-      ),
-      bottomNavigationBar: RimAIBottomNav(
-        currentIndex: 0,
-        onTap: (index) {
-          if (index == 1) context.go('/terapeuta/ia');
-          // if (index == 2) context.go('/terapeuta/calendario');
-        },
-        items: [
-          BottomNavItem(icon: Icons.person, label: "Perfil"),
-          BottomNavItem(icon: Icons.psychology, label: "Terapia"),
-          BottomNavItem(icon: Icons.calendar_today, label: "Calendario"),
-        ],
       ),
       body: perfilAsync.when(
         data: (perfil) {
@@ -115,7 +102,7 @@ class _TherapeuticProfileScreenState
                 top: 96 + MediaQuery.of(context).padding.top,
                 left: 24,
                 right: 24,
-                bottom: 120,
+                bottom: 48,
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -125,10 +112,8 @@ class _TherapeuticProfileScreenState
                   _buildBentoGrid(),
                   const SizedBox(height: 32),
                   _buildEstadoBadge(perfil.estadoClinico),
-                  const SizedBox(height: 16),
-                  _buildPlanButton(perfil),
-                  const SizedBox(height: 16),
-                  _buildAIFeatureButton(perfil),
+                  const SizedBox(height: 24),
+                  _buildQuickNav(perfil),
                 ],
               ),
             ),
@@ -333,21 +318,28 @@ class _TherapeuticProfileScreenState
         children: [
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Row(
-                children: [
-                  const Icon(Icons.star_border, color: Color(0xFFB8D6B2)),
-                  const SizedBox(width: 8),
-                  const Text(
-                    "Intereses y Preferencias",
-                    style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 18,
-                      color: Color(0xFF1E1B16),
+              Expanded(
+                child: Row(
+                  children: [
+                    const Icon(Icons.star_border, color: Color(0xFFB8D6B2)),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text(
+                        "Intereses y Preferencias",
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 18,
+                          color: Color(0xFF1E1B16),
+                        ),
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
+              const SizedBox(width: 12),
               ElevatedButton.icon(
                 onPressed: () {},
                 icon: const Icon(Icons.add, size: 16, color: Color(0xFF1E1B16)),
@@ -692,127 +684,250 @@ class _TherapeuticProfileScreenState
     _ => 'Pendiente de asignación',
   };
 
-  // ── Botón de Plan ─────────────────────────────────────────────────────────────────
-  Widget _buildPlanButton(PacientePerfil perfil) {
+  // ── Panel de Navegación Rápida ────────────────────────────────────────────────
+  Widget _buildQuickNav(PacientePerfil perfil) {
+    final estado = perfil.estadoClinico;
     final hasPlan = perfil.planActivoId != null;
-    if (!hasPlan) return const SizedBox.shrink();
-    return SizedBox(
-      width: double.infinity,
-      child: ElevatedButton.icon(
-        onPressed: () => context.go('/terapeuta/plan/${widget.ninoId}'),
-        icon: const Icon(Icons.assignment_outlined),
-        label: const Text('Ver plan terapeutico'),
-        style: ElevatedButton.styleFrom(
-          backgroundColor: const Color(0xFFB8D6B2),
-          foregroundColor: const Color(0xFF1E1B16),
-          padding: const EdgeInsets.symmetric(vertical: 18),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(100)),
+    final isActive = estado == 'plan_activo' || estado == 'listo_para_plan';
+    final isPending = estado == 'pendiente_asignacion';
+    final isIncomplete = estado == 'perfil_clinico_incompleto' || estado == 'vinculado_terapeuta';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'ACCIONES RÁPIDAS',
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.bold,
+            letterSpacing: 1.2,
+            color: Color(0xFF58423B),
+          ),
+        ),
+        const SizedBox(height: 12),
+
+        // ── Botón: Ver / Generar Plan ──────────────────────────────────────────
+        if (hasPlan)
+          _quickNavTile(
+            icon: Icons.assignment_outlined,
+            iconColor: const Color(0xFF4A624D),
+            bgColor: const Color(0xFFB8D6B2).withOpacity(0.25),
+            label: 'Plan Terapéutico',
+            subtitle: 'Ver actividades del plan activo',
+            onTap: () => context.go('/terapeuta/plan/${widget.ninoId}'),
+          )
+        else if (isIncomplete)
+          _quickNavTile(
+            icon: Icons.edit_note_rounded,
+            iconColor: const Color(0xFFD97706),
+            bgColor: const Color(0xFFF59E0B).withOpacity(0.12),
+            label: 'Completar Perfil Clínico',
+            subtitle: 'Requerido para generar el plan',
+            onTap: () => context.go('/terapeuta/admision?ninoId=${widget.ninoId}'),
+          )
+        else if (isPending)
+          _quickNavTile(
+            icon: Icons.hourglass_empty,
+            iconColor: const Color(0xFF94A3B8),
+            bgColor: const Color(0xFFF1F5F9),
+            label: 'Sin plan asignado',
+            subtitle: 'Esperando asignación a terapeuta',
+            onTap: null,
+          ),
+
+        const SizedBox(height: 12),
+
+        // ── Botón: Asistente IA ──────────────────────────────────────────────
+        _quickNavTile(
+          icon: Icons.auto_awesome,
+          iconColor: const Color(0xFFA43714),
+          bgColor: const Color(0xFFFFF3F0),
+          label: 'Asistente IA',
+          subtitle: 'Recomendaciones y plan de sesión',
+          onTap: isActive
+              ? () => context.go('/terapeuta/ia/${widget.ninoId}')
+              : null,
+          disabledReason: isPending
+              ? 'Disponible tras asignación'
+              : isIncomplete
+                  ? 'Completa el perfil primero'
+                  : null,
+        ),
+
+        const SizedBox(height: 12),
+
+        // ── Botón: Progreso Clínico ──────────────────────────────────────────
+        _quickNavTile(
+          icon: Icons.insights,
+          iconColor: const Color(0xFF1A365D),
+          bgColor: const Color(0xFFEBF4FF),
+          label: 'Progreso Clínico',
+          subtitle: 'Métricas y evolución de sesiones',
+          onTap: hasPlan
+              ? () => context.go('/terapeuta/progreso/${widget.ninoId}')
+              : null,
+          disabledReason: !hasPlan ? 'Disponible con plan activo' : null,
+        ),
+
+        const SizedBox(height: 12),
+
+        // ── Botón: Generar/Regenerar Plan IA ────────────────────────────────
+        if (isActive)
+          _buildGeneratePlanTile(estado),
+      ],
+    );
+  }
+
+  Widget _quickNavTile({
+    required IconData icon,
+    required Color iconColor,
+    required Color bgColor,
+    required String label,
+    required String subtitle,
+    required VoidCallback? onTap,
+    String? disabledReason,
+  }) {
+    final enabled = onTap != null;
+    return AnimatedOpacity(
+      opacity: enabled ? 1.0 : 0.55,
+      duration: const Duration(milliseconds: 200),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(16),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+            decoration: BoxDecoration(
+              color: enabled ? bgColor : const Color(0xFFF5F5F5),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: enabled
+                    ? iconColor.withOpacity(0.18)
+                    : const Color(0xFFE0E0E0),
+              ),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: enabled
+                        ? iconColor.withOpacity(0.12)
+                        : const Color(0xFFEEEEEE),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(icon,
+                      color: enabled ? iconColor : const Color(0xFFBDBDBD),
+                      size: 22),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        label,
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                          color: enabled
+                              ? const Color(0xFF1E1B16)
+                              : const Color(0xFF9E9E9E),
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        disabledReason ?? subtitle,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: disabledReason != null
+                              ? const Color(0xFFD97706)
+                              : const Color(0xFF8B716A),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(
+                  enabled ? Icons.chevron_right : Icons.lock_outline,
+                  color: enabled
+                      ? iconColor.withOpacity(0.5)
+                      : const Color(0xFFBDBDBD),
+                  size: 20,
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
   }
 
-  // ── Botón IA (condicional por estado) ──────────────────────────────────────────
-  Widget _buildAIFeatureButton(PacientePerfil perfil) {
-    final estado = perfil.estadoClinico;
-    final isIncomplete = estado == 'perfil_clinico_incompleto' || estado == 'vinculado_terapeuta';
-    final isPending = estado == 'pendiente_asignacion';
-
-    // Estado pendiente de asignación
-    if (isPending) {
-      return Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: const Color(0xFFF5F5F5),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: const Color(0xFFDFC0B7).withOpacity(0.5)),
-        ),
-        child: Row(children: [
-          const Icon(Icons.hourglass_empty, color: Color(0xFF94A3B8), size: 28),
-          const SizedBox(width: 16),
-          const Expanded(child: Text(
-            'Esperando asignación a terapeuta',
-            style: TextStyle(color: Color(0xFF58423B), fontWeight: FontWeight.bold),
-          )),
-        ]),
-      );
-    }
-
-    // Estado incompleto: mostrar botón deshabilitado con acción de completar perfil
-    if (isIncomplete) {
-      return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Padding(
-          padding: EdgeInsets.only(bottom: 8),
-          child: Text('Completa el perfil clínico antes de generar el plan:',
-              style: TextStyle(color: Color(0xFF58423B), fontSize: 13)),
-        ),
-        SizedBox(
-          width: double.infinity,
-          child: ElevatedButton.icon(
-            onPressed: () => context.go('/terapeuta/admision?ninoId=${widget.ninoId}'),
-            icon: const Icon(Icons.edit_note_rounded),
-            label: const Text('Completar perfil clínico'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFF59E0B),
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              elevation: 0,
-            ),
-          ),
-        ),
-      ]);
-    }
-
-    // Estado listo o plan activo: botón IA activo
-    return Container(
-      width: double.infinity,
-      decoration: BoxDecoration(
-        color: const Color(0xFF1E1B16),
+  Widget _buildGeneratePlanTile(String estado) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: _isGeneratingPlan ? null : _generarPlanIA,
         borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFFB8D6B2).withOpacity(0.3),
-            blurRadius: 20,
-            offset: const Offset(0, 10),
-          )
-        ],
-      ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: _isGeneratingPlan ? null : _generarPlanIA,
-          borderRadius: BorderRadius.circular(16),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 24),
-            child: Row(children: [
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1E1B16),
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFFB8D6B2).withOpacity(0.25),
+                blurRadius: 16,
+                offset: const Offset(0, 6),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
               Container(
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFB8D6B2).withOpacity(0.2),
+                  color: const Color(0xFFB8D6B2).withOpacity(0.15),
                   shape: BoxShape.circle,
                 ),
                 child: _isGeneratingPlan
-                    ? const SizedBox(width: 24, height: 24,
-                        child: CircularProgressIndicator(color: Color(0xFFB8D6B2), strokeWidth: 2))
-                    : const Icon(Icons.auto_awesome, color: Color(0xFFB8D6B2), size: 24),
+                    ? const SizedBox(
+                        width: 22, height: 22,
+                        child: CircularProgressIndicator(
+                            color: Color(0xFFB8D6B2), strokeWidth: 2))
+                    : const Icon(Icons.auto_awesome,
+                        color: Color(0xFFB8D6B2), size: 22),
               ),
               const SizedBox(width: 16),
-              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(
-                  _isGeneratingPlan ? 'Analizando con IA...' :
-                      (estado == 'plan_activo' ? 'Regenerar Plan con IA' : 'Generar Plan Terapeutico (IA)'),
-                  style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _isGeneratingPlan
+                          ? 'Analizando con IA...'
+                          : (estado == 'plan_activo'
+                              ? 'Regenerar Plan con IA'
+                              : 'Generar Plan Terapéutico (IA)'),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Predicción de dificultad · Random Forest',
+                      style: TextStyle(
+                          color: Colors.white.withOpacity(0.55), fontSize: 12),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  'Predicción de dificultad mediante Random Forest',
-                  style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12),
-                ),
-              ])),
-              const Icon(Icons.arrow_forward_ios, color: Colors.white54, size: 16),
-            ]),
+              ),
+              const Icon(Icons.arrow_forward_ios,
+                  color: Colors.white38, size: 16),
+            ],
           ),
         ),
       ),

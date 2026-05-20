@@ -186,13 +186,12 @@ BEGIN
   DELETE FROM resultados_actividad WHERE sesion_id = v_sesion_id;
   INSERT INTO resultados_actividad (
     sesion_id, actividad_id, tiempo_respuesta, aciertos, repeticiones,
-    nivel_ayuda_requerido, nivel_dificultad_usado, observaciones,
-    emocion_detectada, confianza_emocion
+    nivel_ayuda_requerido, nivel_dificultad_usado, observaciones
   )
   VALUES
-    (v_sesion_id, v_act1_id, 2.4, 8, 10, 0, 'Bajo', 'Buena tolerancia a la musica.', 'neutral', 0.82),
-    (v_sesion_id, v_act2_id, 3.8, 6, 10, 1, 'Medio', 'Requirio apoyo verbal para sostener atencion.', 'happy', 0.74),
-    (v_sesion_id, v_act3_id, 1.9, 9, 10, 0, 'Bajo', 'Transicion de cierre estable.', 'neutral', 0.91);
+    (v_sesion_id, v_act1_id, 2.4, 8, 10, 0, 'Bajo', 'Buena tolerancia a la musica.'),
+    (v_sesion_id, v_act2_id, 3.8, 6, 10, 1, 'Medio', 'Requirio apoyo verbal para sostener atencion.'),
+    (v_sesion_id, v_act3_id, 1.9, 9, 10, 0, 'Bajo', 'Transicion de cierre estable.');
 
   RAISE NOTICE 'RimAI seed listo: terapeuta@rimai.com / test1234';
 END $$;

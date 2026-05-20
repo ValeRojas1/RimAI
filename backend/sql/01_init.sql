@@ -1,5 +1,5 @@
 -- ============================================
--- RimAI — Init SQL — PMV 1
+-- RimAI init SQL
 -- ============================================
 
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
@@ -18,7 +18,6 @@ CREATE TABLE usuarios (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Terapeutas (extiende usuarios)
 CREATE TABLE terapeutas (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     usuario_id UUID NOT NULL UNIQUE REFERENCES usuarios(id) ON DELETE CASCADE,
@@ -26,14 +25,13 @@ CREATE TABLE terapeutas (
     colegiatura VARCHAR(50)
 );
 
--- Padres / tutores
 CREATE TABLE padres_tutores (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     usuario_id UUID NOT NULL UNIQUE REFERENCES usuarios(id) ON DELETE CASCADE,
     telefono VARCHAR(20)
 );
 
--- Niños con TEA
+-- Ninos con TEA
 CREATE TYPE nivel_cognitivo AS ENUM ('Bajo', 'Medio', 'Alto');
 
 CREATE TABLE ninos (
@@ -60,12 +58,12 @@ CREATE TABLE actividades (
     nombre VARCHAR(200) NOT NULL,
     instrucciones TEXT,
     nivel_dificultad nivel_dificultad NOT NULL,
-    duracion_estimada INT,           -- en segundos
+    duracion_estimada INT,
     recursos_multimedia JSONB,
     activo BOOLEAN DEFAULT TRUE
 );
 
--- Planes terapéuticos
+-- Planes terapeuticos
 CREATE TABLE planes_terapeuticos (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     nombre VARCHAR(200) NOT NULL DEFAULT 'Plan terapeutico activo',
@@ -79,7 +77,6 @@ CREATE TABLE planes_terapeuticos (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Relación plan ↔ actividades
 CREATE TABLE plan_actividades (
     plan_id UUID REFERENCES planes_terapeuticos(id) ON DELETE CASCADE,
     actividad_id UUID REFERENCES actividades(id),
@@ -87,7 +84,7 @@ CREATE TABLE plan_actividades (
     PRIMARY KEY (plan_id, actividad_id)
 );
 
--- Sesiones terapéuticas
+-- Sesiones terapeuticas
 CREATE TYPE estado_sesion AS ENUM ('completada', 'interrumpida', 'pendiente_sync');
 
 CREATE TABLE sesiones (
@@ -101,7 +98,6 @@ CREATE TABLE sesiones (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Resultados por actividad
 CREATE TABLE resultados_actividad (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     sesion_id UUID NOT NULL REFERENCES sesiones(id),
@@ -112,17 +108,9 @@ CREATE TABLE resultados_actividad (
     nivel_ayuda_requerido INT DEFAULT 0,
     nivel_dificultad_usado nivel_dificultad DEFAULT 'Medio',
     observaciones TEXT,
-    emocion_detectada VARCHAR(50),
     confianza_emocion FLOAT,
     timestamp TIMESTAMPTZ DEFAULT NOW()
 );
-
--- Índices para rendimiento
-CREATE INDEX idx_ninos_terapeuta ON ninos(terapeuta_id);
-CREATE INDEX idx_sesiones_nino ON sesiones(nino_id);
-CREATE INDEX idx_sesiones_plan ON sesiones(plan_id);
-CREATE INDEX idx_resultados_sesion ON resultados_actividad(sesion_id);
-CREATE INDEX idx_planes_nino ON planes_terapeuticos(nino_id);
 
 CREATE TABLE decisiones_clinicas (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -133,3 +121,10 @@ CREATE TABLE decisiones_clinicas (
     observacion TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Indices
+CREATE INDEX idx_ninos_terapeuta ON ninos(terapeuta_id);
+CREATE INDEX idx_sesiones_nino ON sesiones(nino_id);
+CREATE INDEX idx_sesiones_plan ON sesiones(plan_id);
+CREATE INDEX idx_resultados_sesion ON resultados_actividad(sesion_id);
+CREATE INDEX idx_planes_nino ON planes_terapeuticos(nino_id);

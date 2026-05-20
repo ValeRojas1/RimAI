@@ -16,10 +16,12 @@ dependencies:
   
   # HTTP y red
   dio: ^5.4.0
+  http: ^1.6.0
   
   # Base de datos local (offline)
   sqflite: ^2.3.0
   path: ^1.9.0
+  uuid: ^4.5.3
   
   # Autenticación JWT
   flutter_secure_storage: ^9.0.0
@@ -29,9 +31,7 @@ dependencies:
   firebase_core: ^3.0.0
   firebase_messaging: ^15.0.0
   
-  # Cámara (IA-04 emocional)
-  camera: ^0.10.5
-  google_mlkit_face_detection: ^0.11.0
+
   
   
   # UI y accesibilidad

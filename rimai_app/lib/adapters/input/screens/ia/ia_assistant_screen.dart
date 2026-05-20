@@ -1,781 +1,304 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:animated_text_kit/animated_text_kit.dart';
-import 'package:flutter_animate/flutter_animate.dart';
 
-import 'package:rimai_app/adapters/input/widgets/rimai_top_bar.dart';
-import 'package:rimai_app/adapters/input/widgets/rimai_bottom_nav.dart';
 import 'package:rimai_app/adapters/input/widgets/bento_card.dart';
-import 'package:rimai_app/adapters/input/widgets/session_step_card.dart';
+import 'package:rimai_app/adapters/input/widgets/rimai_bottom_nav.dart';
+import 'package:rimai_app/adapters/input/widgets/rimai_top_bar.dart';
 import 'package:rimai_app/core/providers/pmv2_providers.dart';
 
 class IAAssistantScreen extends ConsumerStatefulWidget {
   final String? ninoId;
+
   const IAAssistantScreen({super.key, this.ninoId});
 
   @override
   ConsumerState<IAAssistantScreen> createState() => _IAAssistantScreenState();
 }
 
-class _IAAssistantScreenState extends ConsumerState<IAAssistantScreen>
-    with SingleTickerProviderStateMixin {
+class _IAAssistantScreenState extends ConsumerState<IAAssistantScreen> {
   final _observationController = TextEditingController();
-  bool _isProcessing = true;
-  late AnimationController _scanController;
-
-  @override
-  void initState() {
-    super.initState();
-    _scanController = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 3),
-    )..repeat();
-
-    // Simulate processing phase
-    Future.delayed(const Duration(seconds: 3), () {
-      if (mounted) setState(() => _isProcessing = false);
-    });
-  }
 
   @override
   void dispose() {
     _observationController.dispose();
-    _scanController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final ninoId = widget.ninoId;
-    if (ninoId == null) {
-      return Scaffold(
-        backgroundColor: const Color(0xFFFFF8F2),
-        appBar: const RimAITopBar(
-            title: 'Asistente IA',
-            leadingIcon: Icons.psychology,
-            iconColor: Color(0xFF4A624D)),
-        body: const Center(
-            child: Text('Selecciona un paciente desde el Dashboard.')),
-      );
-    }
+
     return Scaffold(
       backgroundColor: const Color(0xFFFFF8F2),
-      extendBodyBehindAppBar: true,
-      appBar: RimAITopBar(
-        title: "Asistente IA",
+      extendBodyBehindAppBar: ninoId != null,
+      appBar: const RimAITopBar(
+        title: 'Asistente IA',
         leadingIcon: Icons.psychology,
-        iconColor: const Color(0xFF4A624D),
-        trailingWidget: const CircleAvatar(
-          radius: 20,
-          backgroundColor: Color(0xFFFAF2E9),
-          child: Icon(Icons.person, color: Color(0xFF58423B)),
+        iconColor: Color(0xFF4A624D),
+      ),
+      bottomNavigationBar: ninoId == null
+          ? null
+          : RimAIBottomNav(
+              currentIndex: 2,
+              onTap: (index) {
+                if (index == 0) context.go('/terapeuta/dashboard');
+                if (index == 1) context.go('/terapeuta/plan/$ninoId');
+                if (index == 3) context.go('/terapeuta/progreso/$ninoId');
+              },
+              items: [
+                BottomNavItem(icon: Icons.home, label: 'Inicio'),
+                BottomNavItem(icon: Icons.assignment, label: 'Plan'),
+                BottomNavItem(icon: Icons.auto_awesome, label: 'IA'),
+                BottomNavItem(icon: Icons.insights, label: 'Progreso'),
+              ],
+            ),
+      body: ninoId == null
+          ? const Center(
+              child: Text('Selecciona un paciente desde el dashboard.'))
+          : _AssistantContent(
+              ninoId: ninoId,
+              observationController: _observationController,
+            ),
+    );
+  }
+}
+
+class _AssistantContent extends ConsumerWidget {
+  final String ninoId;
+  final TextEditingController observationController;
+
+  const _AssistantContent({
+    required this.ninoId,
+    required this.observationController,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final assistantAsync = ref.watch(iaAssistantProvider(ninoId));
+
+    return SingleChildScrollView(
+      padding: EdgeInsets.only(
+        top: 96 + MediaQuery.of(context).padding.top,
+        left: 24,
+        right: 24,
+        bottom: 120,
+      ),
+      child: assistantAsync.when(
+        loading: () => const Center(
+          child: CircularProgressIndicator(color: Color(0xFF4A624D)),
         ),
-      ),
-      bottomNavigationBar: RimAIBottomNav(
-        currentIndex: 2,
-        onTap: (index) {
-          if (index == 0) context.go('/terapeuta/dashboard');
-          if (index == 1) context.go('/terapeuta/plan/$ninoId');
-          if (index == 3) context.go('/terapeuta/progreso/$ninoId');
-        },
-        items: [
-          BottomNavItem(icon: Icons.home, label: "Inicio"),
-          BottomNavItem(icon: Icons.spatial_audio_off, label: "Sesión"),
-          BottomNavItem(icon: Icons.auto_awesome, label: "IA"),
-          BottomNavItem(icon: Icons.insights, label: "Progreso"),
-        ],
-      ),
-      body: SingleChildScrollView(
-        child: Padding(
-          padding: EdgeInsets.only(
-            top: 96 + MediaQuery.of(context).padding.top,
-            left: 24,
-            right: 24,
-            bottom: 120,
+        error: (error, _) => BentoCard(
+          backgroundColor: const Color(0xFFFAF2E9),
+          child: Text(
+            'No se pudo cargar el asistente IA: $error',
+            style: const TextStyle(color: Color(0xFF58423B)),
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildProcessingStatus(),
-              const SizedBox(height: 24),
-              _buildHeader(),
-              const SizedBox(height: 32),
-              _buildBentoGrid(),
-              const SizedBox(height: 32),
-              _buildRecommendations(widget.ninoId!),
-              const SizedBox(height: 32),
-              _buildSystemLog(),
-              const SizedBox(height: 32),
-              _buildObservationSection(),
-            ],
-          ),
+        ),
+        data: (data) => Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              data.ninoNombre,
+              style: const TextStyle(
+                color: Color(0xFF58423B),
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Asistente IA',
+              style: TextStyle(
+                fontSize: 32,
+                fontWeight: FontWeight.w800,
+                color: Color(0xFF1E1B16),
+              ),
+            ),
+            const SizedBox(height: 24),
+            _AnalysisCard(data: data),
+            const SizedBox(height: 24),
+            _RecommendationsCard(
+              ninoId: ninoId,
+              recomendaciones: data.recomendaciones,
+              observationController: observationController,
+            ),
+            const SizedBox(height: 24),
+            _SessionPlanCard(planSesion: data.planSesion),
+          ],
         ),
       ),
     );
   }
+}
 
-  Widget _buildRecommendations(String ninoId) {
-    final assistantAsync = ref.watch(iaAssistantProvider(ninoId));
-    return assistantAsync.when(
-      loading: () => const Center(
-          child: CircularProgressIndicator(color: Color(0xFF4A624D))),
-      error: (e, _) => Text('No se pudieron cargar recomendaciones: $e'),
-      data: (data) {
-        if (data.recomendaciones.isEmpty) {
-          return BentoCard(
-            backgroundColor: const Color(0xFFFAF2E9),
-            child: const Text(
+class _AnalysisCard extends StatelessWidget {
+  final IAAssistantData data;
+
+  const _AnalysisCard({required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    return BentoCard(
+      backgroundColor: const Color(0xFFFAF2E9),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Analisis cognitivo',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 16),
+          LinearProgressIndicator(
+            value: data.analisis.cargaCognitiva.clamp(0, 1),
+            minHeight: 10,
+            color: const Color(0xFF4A624D),
+            backgroundColor: const Color(0xFFE9E1D8),
+          ),
+          const SizedBox(height: 12),
+          Text(
+              'Carga cognitiva: ${(data.analisis.cargaCognitiva * 100).round()}%'),
+          Text('Foco estimado: ${data.analisis.focoEstimado}'),
+          Text('Nivel de calma: ${data.analisis.nivelCalma}/10'),
+        ],
+      ),
+    );
+  }
+}
+
+class _RecommendationsCard extends ConsumerWidget {
+  final String ninoId;
+  final List<RecomendacionClinica> recomendaciones;
+  final TextEditingController observationController;
+
+  const _RecommendationsCard({
+    required this.ninoId,
+    required this.recomendaciones,
+    required this.observationController,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return BentoCard(
+      backgroundColor: Colors.white,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Recomendaciones',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 16),
+          if (recomendaciones.isEmpty)
+            const Text(
                 'No hay recomendaciones disponibles para este paciente.'),
-          );
-        }
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('RECOMENDACIONES IA-02 / IA-03',
-                style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF4A624D))),
-            const SizedBox(height: 16),
-            ...data.recomendaciones.map((rec) => Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: BentoCard(
-                    backgroundColor: const Color(0xFFFAF2E9),
-                    padding: const EdgeInsets.all(20),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(rec.actividad,
-                            style: const TextStyle(
-                                fontWeight: FontWeight.bold, fontSize: 16)),
-                        const SizedBox(height: 8),
-                        Text(rec.justificacion,
-                            style: const TextStyle(color: Color(0xFF58423B))),
-                        const SizedBox(height: 12),
-                        Row(
-                          children: [
-                            Text(
-                                'Confianza ${(rec.confianza * 100).toStringAsFixed(0)}%',
-                                style: const TextStyle(
-                                    color: Color(0xFF4A624D),
-                                    fontWeight: FontWeight.bold)),
-                            const Spacer(),
-                            TextButton(
-                              onPressed: () => _registrarDecision(
-                                  rec.id, 'RECHAZADA', ninoId),
-                              child: const Text('Rechazar'),
-                            ),
-                            const SizedBox(width: 8),
-                            ElevatedButton(
-                              onPressed: () => _registrarDecision(
-                                  rec.id, 'ACEPTADA', ninoId),
-                              style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFF4A624D),
-                                  foregroundColor: Colors.white),
-                              child: const Text('Aceptar'),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
+          ...recomendaciones.map(
+            (rec) => Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    rec.actividad,
+                    style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
-                )),
-          ],
-        );
-      },
+                  const SizedBox(height: 4),
+                  Text(rec.justificacion),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Text('Confianza ${(rec.confianza * 100).round()}%'),
+                      const Spacer(),
+                      TextButton(
+                        onPressed: () => _registrarDecision(
+                          context,
+                          ref,
+                          rec.id,
+                          'RECHAZADA',
+                        ),
+                        child: const Text('Rechazar'),
+                      ),
+                      const SizedBox(width: 8),
+                      ElevatedButton(
+                        onPressed: () => _registrarDecision(
+                          context,
+                          ref,
+                          rec.id,
+                          'ACEPTADA',
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF4A624D),
+                          foregroundColor: Colors.white,
+                        ),
+                        child: const Text('Aceptar'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: observationController,
+            minLines: 3,
+            maxLines: null,
+            decoration: const InputDecoration(
+              border: OutlineInputBorder(),
+              hintText: 'Observaciones clinicas',
+            ),
+          ),
+        ],
+      ),
     );
   }
 
   Future<void> _registrarDecision(
-      String id, String accion, String ninoId) async {
-    await ref
-        .read(registrarDecisionProvider)
-        .ejecutar(id, accion, _observationController.text, ninoId: ninoId);
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Decision $accion registrada.')));
-    }
-  }
-
-  Widget _buildProcessingStatus() {
-    return AnimatedOpacity(
-      duration: const Duration(milliseconds: 500),
-      opacity: _isProcessing ? 1.0 : 0.0,
-      child: _isProcessing
-          ? Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              decoration: BoxDecoration(
-                color: const Color(0xFF4A624D).withOpacity(0.1),
-                borderRadius: BorderRadius.circular(100),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
-                    children: List.generate(3, (index) {
-                      return Container(
-                        margin: const EdgeInsets.symmetric(horizontal: 2),
-                        width: 6,
-                        height: 6,
-                        decoration: const BoxDecoration(
-                          color: Color(0xFF4A624D),
-                          shape: BoxShape.circle,
-                        ),
-                      )
-                          .animate(
-                              onPlay: (controller) =>
-                                  controller.repeat(reverse: true))
-                          .scale(
-                            duration: 400.ms,
-                            delay: (index * 200).ms,
-                            begin: const Offset(0.5, 0.5),
-                            end: const Offset(1.2, 1.2),
-                          );
-                    }),
-                  ),
-                  const SizedBox(width: 8),
-                  const Text(
-                    "PROCESANDO PERFIL...",
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFF4A624D),
-                      letterSpacing: 1,
-                    ),
-                  ),
-                ],
-              ),
-            )
-          : const SizedBox.shrink(),
-    );
-  }
-
-  Widget _buildHeader() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        RichText(
-          text: const TextSpan(
-            style: TextStyle(
-              fontSize: 36,
-              fontWeight: FontWeight.w800,
-              letterSpacing: -1,
-              color: Color(0xFF1E1B16),
-              fontFamily: 'PlusJakartaSans',
-            ),
-            children: [
-              TextSpan(text: "Análisis Cognitivo en\n"),
-              TextSpan(
-                  text: "Tiempo Real",
-                  style: TextStyle(color: Color(0xFF4A624D))),
-            ],
-          ),
-        ),
-        const SizedBox(height: 16),
-        Text(
-          "El asistente IA analiza indicadores biométricos y genera un plan adaptativo instantáneo.",
-          style: TextStyle(
-            fontSize: 16,
-            color: const Color(0xFF58423B),
-            height: 1.5,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildBentoGrid() {
-    final resumenAsync = ref.watch(resumenSesionProvider(widget.ninoId!));
-    final planSesionAsync = ref.watch(planSesionProvider(widget.ninoId!));
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final isDesktop = constraints.maxWidth >= 768;
-
-        return Column(
-          children: [
-            if (isDesktop)
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                      flex: 7, child: _buildSensorySummaryCard(resumenAsync)),
-                  const SizedBox(width: 24),
-                  Expanded(
-                      flex: 5,
-                      child: _buildPredictiveMetricsCard(resumenAsync)),
-                ],
-              )
-            else
-              Column(
-                children: [
-                  _buildSensorySummaryCard(resumenAsync),
-                  const SizedBox(height: 24),
-                  _buildPredictiveMetricsCard(resumenAsync),
-                ],
-              ),
-            const SizedBox(height: 24),
-            _buildSessionPlanCard(planSesionAsync),
-          ],
+    BuildContext context,
+    WidgetRef ref,
+    String recomendacionId,
+    String accion,
+  ) async {
+    await ref.read(registrarDecisionProvider).ejecutar(
+          recomendacionId,
+          accion,
+          observationController.text,
+          ninoId: ninoId,
         );
-      },
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Decision $accion registrada.')),
     );
   }
+}
 
-  Widget _buildSensorySummaryCard(AsyncValue<ResumenSesionData> asyncData) {
-    return BentoCard(
-      backgroundColor: const Color(0xFFF5EDE4),
-      backgroundWidget: AnimatedBuilder(
-        animation: _scanController,
-        builder: (context, child) {
-          return ShaderMask(
-            shaderCallback: (bounds) {
-              return LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                stops: [
-                  _scanController.value - 0.2,
-                  _scanController.value,
-                  _scanController.value + 0.2
-                ],
-                colors: [
-                  Colors.transparent,
-                  const Color(0xFFB8D6B2).withOpacity(0.2),
-                  Colors.transparent,
-                ],
-              ).createShader(bounds);
-            },
-            blendMode: BlendMode.srcOver,
-            child: Container(color: Colors.transparent),
-          );
-        },
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: const [
-                    Text("MÓDULO 01",
-                        style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 1)),
-                    SizedBox(height: 4),
-                    Text("Resumen Sensorial",
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                            fontSize: 22, fontWeight: FontWeight.bold)),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 12),
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(8)),
-                child: const Icon(Icons.graphic_eq, color: Color(0xFF4A624D)),
-              )
-            ],
-          ),
-          const SizedBox(height: 24),
-          _buildSensoryItem(Icons.visibility, "Hipersensibilidad Visual",
-              "Luz blanca causa evitación."),
-          const SizedBox(height: 12),
-          _buildSensoryItem(Icons.volume_up, "Umbral Auditivo",
-              "Sensible a frecuencias agudas.",
-              highlightColor: const Color(0xFF4A624D)),
-          const SizedBox(height: 24),
-          asyncData.when(
-            data: (data) => Column(
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text("Carga Cognitiva Actual",
-                        style: TextStyle(fontWeight: FontWeight.w500)),
-                    Text("${(data.cargaCognitiva * 100).toInt()}%",
-                        style: const TextStyle(fontWeight: FontWeight.bold)),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(100),
-                  child: LinearProgressIndicator(
-                    value: data.cargaCognitiva,
-                    backgroundColor: const Color(0xFFEEDDC8),
-                    color: const Color(0xFF4A624D),
-                    minHeight: 12,
-                  ),
-                ),
-              ],
-            ),
-            loading: () =>
-                const LinearProgressIndicator(color: Color(0xFFB8D6B2)),
-            error: (e, st) => const Text("Error al cargar"),
-          )
-        ],
-      ),
-    );
-  }
+class _SessionPlanCard extends StatelessWidget {
+  final List<SessionStep> planSesion;
 
-  Widget _buildSensoryItem(IconData icon, String title, String subtitle,
-      {Color? highlightColor}) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFFFAF2E9),
-        borderRadius: BorderRadius.circular(12),
-        border: highlightColor != null
-            ? Border(left: BorderSide(color: highlightColor, width: 4))
-            : null,
-      ),
-      child: Row(
-        children: [
-          Icon(icon, color: const Color(0xFF4A624D)),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontWeight: FontWeight.bold)),
-                Text(subtitle,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        fontSize: 14, color: Color(0xFF58423B))),
-              ],
-            ),
-          )
-        ],
-      ),
-    );
-  }
+  const _SessionPlanCard({required this.planSesion});
 
-  Widget _buildPredictiveMetricsCard(AsyncValue<ResumenSesionData> asyncData) {
-    return BentoCard(
-      backgroundColor: const Color(0xFF4A624D),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text("MÓDULO 02",
-              style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 1,
-                  color: Color(0xFFCFE9CF))),
-          const SizedBox(height: 4),
-          const Text("Métricas Predictivas",
-              style: TextStyle(
-                  fontSize: 22,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.white)),
-          const SizedBox(height: 8),
-          const Text(
-            "Análisis basado en historial del menor.",
-            style:
-                TextStyle(fontSize: 14, color: Color(0xFFB3CDB4), height: 1.5),
-          ),
-          const SizedBox(height: 24),
-          asyncData.when(
-            data: (data) => Column(
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text("Foco Estimado",
-                        style: TextStyle(
-                            color: Colors.white, fontWeight: FontWeight.w500)),
-                    Text(data.focoEstimado,
-                        style: const TextStyle(
-                            fontSize: 28,
-                            color: Colors.black,
-                            fontWeight: FontWeight.bold)),
-                  ],
-                ),
-                Divider(color: Colors.white.withOpacity(0.1), height: 32),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text("Nivel de Calma",
-                        style: TextStyle(
-                            color: Colors.white, fontWeight: FontWeight.w500)),
-                    Text("${data.nivelCalma}/10",
-                        style: const TextStyle(
-                            fontSize: 28,
-                            color: Colors.black,
-                            fontWeight: FontWeight.bold)),
-                  ],
-                ),
-              ],
-            ),
-            loading: () => const CircularProgressIndicator(color: Colors.white),
-            error: (e, st) => const Text("Error al cargar",
-                style: TextStyle(color: Colors.red)),
-          ),
-          const SizedBox(height: 24),
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Row(
-              children: const [
-                Icon(Icons.bolt, color: Color(0xFFCFE9CF)),
-                SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                      "ALERTA: Posible pico de estrés si la duración supera 25 min.",
-                      style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white)),
-                )
-              ],
-            ),
-          )
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSessionPlanCard(AsyncValue<List<SessionStep>> planAsync) {
+  @override
+  Widget build(BuildContext context) {
     return BentoCard(
       backgroundColor: const Color(0xFFFAF2E9),
-      backgroundWidget: Positioned(
-        bottom: -50,
-        right: -50,
-        child: Icon(Icons.psychology_alt,
-            size: 200, color: const Color(0xFF58423B).withOpacity(0.05)),
-      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          LayoutBuilder(
-            builder: (context, headerConstraints) {
-              final runButton = ElevatedButton.icon(
-                onPressed: () {},
-                icon: const Icon(Icons.play_arrow, color: Colors.white),
-                label: const Text("Ejecutar Sesión",
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: Colors.white)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF4A624D),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(100)),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                ),
-              );
-
-              final title = Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: const [
-                  Text("MÓDULO 03",
-                      style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 1)),
-                  SizedBox(height: 4),
-                  Text("Plan de Sesión Recomendado",
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style:
-                          TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                ],
-              );
-
-              if (headerConstraints.maxWidth < 520) {
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    title,
-                    const SizedBox(height: 16),
-                    SizedBox(width: double.infinity, child: runButton),
-                  ],
-                );
-              }
-
-              return Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(child: title),
-                  const SizedBox(width: 16),
-                  Flexible(child: runButton),
-                ],
-              );
-            },
-          ),
-          const SizedBox(height: 24),
-          planAsync.when(
-            data: (steps) => GridView.count(
-              crossAxisCount: MediaQuery.of(context).size.width < 768
-                  ? 1
-                  : (MediaQuery.of(context).size.width < 1024 ? 2 : 3),
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              childAspectRatio: 1.1,
-              mainAxisSpacing: 16,
-              crossAxisSpacing: 16,
-              children: steps.asMap().entries.map((entry) {
-                return SessionStepCard(
-                  stepNumber: entry.key + 1,
-                  title: entry.value.title,
-                  description: entry.value.description,
-                  duration: entry.value.duration,
-                  hasScanning: entry.value.hasScanning,
-                );
-              }).toList(),
-            ),
-            loading: () => const Center(
-                child: CircularProgressIndicator(color: Color(0xFF4A624D))),
-            error: (e, st) => Text("Error: $e"),
-          )
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSystemLog() {
-    return Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(24),
-        decoration: BoxDecoration(
-          color: const Color(0xFFE9E1D8).withOpacity(0.3),
-          border: Border.all(color: const Color(0xFF4A624D).withOpacity(0.1)),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                    width: 8,
-                    height: 8,
-                    decoration: const BoxDecoration(
-                        color: Color(0xFF22C55E), shape: BoxShape.circle)),
-                const SizedBox(width: 8),
-                const Text("LOG DEL SISTEMA IA",
-                    style: TextStyle(
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 1,
-                        fontFamily: 'monospace')),
-              ],
-            ),
-            const SizedBox(height: 16),
-            DefaultTextStyle(
-              style: const TextStyle(
-                  fontFamily: 'monospace',
-                  color: Color(0xFF58423B),
-                  height: 1.8),
-              child: AnimatedTextKit(
-                animatedTexts: [
-                  TypewriterAnimatedText(
-                    '> Analizando flujos de datos biométricos... OK\n> Calibrando respuesta emocional predictiva... 88% Precisión\n> Sincronizando con dispositivo sensorial... Conectado\n> Generando interfaz adaptativa... Listo para iniciar.',
-                    speed: const Duration(milliseconds: 50),
-                  ),
-                ],
-                isRepeatingAnimation: false,
-                displayFullTextOnTap: true,
-              ),
-            )
-          ],
-        ));
-  }
-
-  Widget _buildObservationSection() {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: const Color(0xFFB8D6B2).withOpacity(0.2),
-        border: Border.all(color: const Color(0xFF4A624D).withOpacity(0.2)),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: const [
-              Icon(Icons.edit_note, color: Color(0xFF4A624D)),
-              SizedBox(width: 8),
-              Text("OBSERVACIONES EN TIEMPO REAL",
-                  style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFF4A624D))),
-            ],
+          const Text(
+            'Plan de sesion',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 16),
-          Stack(
-            children: [
-              TextFormField(
-                controller: _observationController,
-                minLines: 4,
-                maxLines: null,
-                decoration: InputDecoration(
-                  filled: true,
-                  fillColor: Colors.white,
-                  hintText: "Escribe algo que está sucediendo...",
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide(
-                        color: const Color(0xFF4A624D).withOpacity(0.2)),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: Color(0xFF4A624D)),
-                  ),
-                  contentPadding: const EdgeInsets.all(16),
-                ),
-                onChanged: (val) => setState(() {}),
-              ),
-              Positioned(
-                  bottom: 12,
-                  right: 12,
-                  child: AnimatedOpacity(
-                    duration: const Duration(milliseconds: 200),
-                    opacity: _observationController.text.isNotEmpty ? 1.0 : 0.0,
-                    child: FloatingActionButton.small(
-                      onPressed: _observationController.text.isNotEmpty
-                          ? () async {
-                              await ref
-                                  .read(sesionServiceProvider)
-                                  .guardarObservacion(
-                                      'sesion123', _observationController.text);
-                              _observationController.clear();
-                              if (mounted) setState(() {});
-                              // Show a snackbar or something
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                  const SnackBar(
-                                      content: Text("Observación guardada.")));
-                            }
-                          : null,
-                      backgroundColor: const Color(0xFF4A624D),
-                      child: const Icon(Icons.check, color: Colors.white),
-                    ),
-                  ))
-            ],
+          if (planSesion.isEmpty)
+            const Text('No hay pasos sugeridos para la sesion.'),
+          ...planSesion.map(
+            (step) => ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.check_circle_outline),
+              title: Text(step.title),
+              subtitle: Text('${step.description}\n${step.duration}'),
+              isThreeLine: true,
+            ),
           ),
-          const SizedBox(height: 8),
-          Text("Las notas se guardarán automáticamente en el perfil.",
-              style: TextStyle(
-                  fontSize: 10,
-                  fontStyle: FontStyle.italic,
-                  color: const Color(0xFF58423B).withOpacity(0.7))),
         ],
       ),
     );

@@ -2,16 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class PMV2Colors {
-  static const brandAction = Color(0xFFB8D6B2);
-  static const primary = Color(0xFF4A624D);
-  static const primaryContainer = Color(0xFFB8D6B2);
+  static const brandAction = Color(0xFF48BB78); // Success / Verde Menta
+  static const primary = Color(0xFF1A365D); // Azul Marino
+  static const primaryContainer = Color(0xFFEDF2F7);
   static const onPrimaryContainer = Color(0xFF0A2010);
   static const tertiary = Color(0xFF4A624D);
   static const tertiaryContainer = Color(0xFF637A64);
   static const tertiaryFixed = Color(0xFFCFE9CF);
   static const tertiaryFixedDim = Color(0xFFB3CDB4);
   static const onTertiaryFixed = Color(0xFF0A2010);
-  static const surface = Color(0xFFFFF8F2);
+  static const surface = Color(0xFFEDF2F7); // Escala de grises limpios
   static const surfaceContainer = Color(0xFFF5EDE4);
   static const surfaceContainerLow = Color(0xFFFAF2E9);
   static const surfaceContainerLowest = Color(0xFFFFFFFF);

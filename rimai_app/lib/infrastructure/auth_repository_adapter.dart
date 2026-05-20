@@ -22,7 +22,7 @@ class AuthRepositoryAdapter implements AuthRepositoryPort {
   Future<Usuario> registrarUsuario(RegistroUsuarioRequest request) async {
     try {
       final response = await _dio.post(
-        '/api/auth/register',
+        '/api/v1/auth/register',
         data: {
           'nombre': request.nombreCompleto,
           'email': request.correo,
@@ -53,7 +53,7 @@ class AuthRepositoryAdapter implements AuthRepositoryPort {
   }) async {
     try {
       final response = await _dio.post(
-        '/api/auth/login',
+        '/api/v1/auth/login',
         data: {'email': correo, 'password': contrasena},
       );
 

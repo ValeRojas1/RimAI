@@ -18,6 +18,14 @@ import 'package:rimai_app/adapters/input/screens/dashboard/admin_dashboard_scree
 import 'package:rimai_app/adapters/input/screens/admin/create_therapist_screen.dart';
 import 'package:rimai_app/adapters/input/screens/dashboard/patient_admission_screen.dart';
 import 'package:rimai_app/adapters/input/screens/dashboard/pending_patients_screen.dart';
+import 'package:rimai_app/adapters/input/screens/terapeuta/therapist_inbox_screen.dart';
+import 'package:rimai_app/adapters/input/screens/terapeuta/reporte_analitico_screen.dart';
+import 'package:rimai_app/adapters/input/screens/familia/ejecucion_actividad_screen.dart';
+import 'package:rimai_app/domain/entities/reporte.dart';
+import 'package:rimai_app/application/usecases/registrar_actividad_usecase.dart';
+import 'package:rimai_app/application/usecases/sync_offline_usecase.dart';
+import 'package:rimai_app/adapters/output/sqlite_db_repository.dart';
+import 'package:rimai_app/adapters/output/api_sync_repository.dart';
 import 'package:rimai_app/core/providers/auth_providers.dart';
 
 /// Proveedor del enrutador principal de la aplicación, conectado al estado de Riverpod.
@@ -128,10 +136,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         },
       ),
       GoRoute(
-        path: '/terapeuta/ia',
-        builder: (context, state) => const IAAssistantScreen(),
-      ),
-      GoRoute(
         path: '/terapeuta/ia/:ninoId',
         builder: (context, state) {
           final ninoId = state.pathParameters['ninoId'] ?? '1';
@@ -211,8 +215,32 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         builder: (context, state) =>
             const _PlaceholderScreen(title: 'Calendario'),
       ),
+      GoRoute(
+        path: '/terapeuta/admision_bandeja',
+        builder: (context, state) => const TherapistInboxScreen(),
+      ),
+      GoRoute(
+        path: '/terapeuta/reportes',
+        builder: (context, state) {
+          final reporte = state.extra as ReporteAnalitico?;
+          if (reporte == null) return const _PlaceholderScreen(title: 'No hay reporte');
+          return ReporteAnaliticoScreen(reporte: reporte);
+        },
+      ),
 
       // ── Familia / Admin ────────────────────────────────────────────────────
+      GoRoute(
+        path: '/familia/ejecucion',
+        builder: (context, state) {
+          // Instancias mockeadas/básicas para inyección en vista
+          final localDb = SqliteDbRepository();
+          final apiRepo = ApiSyncRepository(baseUrl: "http://localhost:8000", token: "mock");
+          return EjecucionActividadScreen(
+            registrarUsecase: RegistrarActividadUsecase(localDb),
+            syncUsecase: SyncOfflineUsecase(localDb, apiRepo)
+          );
+        },
+      ),
       GoRoute(
         path: '/familia/dashboard',
         builder: (context, state) => const FamiliaDashboardScreen(),

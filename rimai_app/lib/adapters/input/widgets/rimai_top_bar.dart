@@ -6,6 +6,7 @@ class RimAITopBar extends StatelessWidget implements PreferredSizeWidget {
   final IconData leadingIcon;
   final Color iconColor;
   final Widget? trailingWidget;
+  final VoidCallback? onLeadingPressed;
 
   const RimAITopBar({
     super.key,
@@ -13,6 +14,7 @@ class RimAITopBar extends StatelessWidget implements PreferredSizeWidget {
     required this.leadingIcon,
     this.iconColor = const Color(0xFF4A624D),
     this.trailingWidget,
+    this.onLeadingPressed,
   });
 
   @override
@@ -42,7 +44,11 @@ class RimAITopBar extends StatelessWidget implements PreferredSizeWidget {
             children: [
               Row(
                 children: [
-                  Icon(leadingIcon, color: iconColor),
+                  IconButton(
+                    icon: Icon(leadingIcon, color: iconColor),
+                    tooltip: title,
+                    onPressed: onLeadingPressed,
+                  ),
                   const SizedBox(width: 8),
                   Text(
                     title,
