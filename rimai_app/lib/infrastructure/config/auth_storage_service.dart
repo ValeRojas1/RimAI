@@ -101,7 +101,7 @@ class AuthStorageService {
         receiveTimeout: const Duration(seconds: 5),
       ));
       await dio.get(
-        '/api/auth/me',
+        '/api/v1/auth/me',
         options: Options(headers: {'Authorization': 'Bearer $token'}),
       );
       return true; // Token válido

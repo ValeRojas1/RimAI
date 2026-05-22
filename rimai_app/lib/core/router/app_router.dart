@@ -20,13 +20,18 @@ import 'package:rimai_app/adapters/input/screens/dashboard/patient_admission_scr
 import 'package:rimai_app/adapters/input/screens/dashboard/pending_patients_screen.dart';
 import 'package:rimai_app/adapters/input/screens/terapeuta/therapist_inbox_screen.dart';
 import 'package:rimai_app/adapters/input/screens/terapeuta/reporte_analitico_screen.dart';
+import 'package:rimai_app/adapters/input/screens/terapeuta/activities_catalog_screen.dart';
 import 'package:rimai_app/adapters/input/screens/familia/ejecucion_actividad_screen.dart';
 import 'package:rimai_app/domain/entities/reporte.dart';
 import 'package:rimai_app/application/usecases/registrar_actividad_usecase.dart';
 import 'package:rimai_app/application/usecases/sync_offline_usecase.dart';
 import 'package:rimai_app/adapters/output/sqlite_db_repository.dart';
 import 'package:rimai_app/adapters/output/api_sync_repository.dart';
+import 'package:rimai_app/core/constants/api_constants.dart';
 import 'package:rimai_app/core/providers/auth_providers.dart';
+import 'package:rimai_app/adapters/input/screens/admision/scq_form_screen.dart';
+import 'package:rimai_app/adapters/input/screens/admision/scq_result_screen.dart';
+import 'package:rimai_app/domain/entities/scq_result.dart';
 
 /// Proveedor del enrutador principal de la aplicación, conectado al estado de Riverpod.
 final appRouterProvider = Provider<GoRouter>((ref) {
@@ -53,8 +58,9 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         // Token válido → ir al dashboard correspondiente
         final role = await authStorage.getRole();
         if (role == 'terapeuta') return '/terapeuta/dashboard';
-        if (role == 'padre_tutor' || role == 'tutor')
+        if (role == 'padre_tutor' || role == 'tutor') {
           return '/familia/dashboard';
+        }
         if (role == 'admin') return '/admin/dashboard';
         return '/terapeuta/dashboard'; // fallback
       }
@@ -154,6 +160,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const PendingPatientsScreen(),
       ),
       GoRoute(
+        path: '/terapeuta/actividades',
+        builder: (context, state) => const ActivitiesCatalogScreen(),
+      ),
+      GoRoute(
         path: '/terapeuta/sesion',
         builder: (context, state) => const ActiveSessionScreen(sesionId: '1'),
       ),
@@ -180,6 +190,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: '/terapeuta/sesion/resumen',
         builder: (context, state) {
           final extra = state.extra as Map<String, dynamic>? ?? {};
+          final ajustesRaw = extra['ajustesDificultad'];
+          final ajustes = ajustesRaw is List
+              ? ajustesRaw
+                  .whereType<Map>()
+                  .map((item) => item.cast<String, dynamic>())
+                  .toList()
+              : <Map<String, dynamic>>[];
           return SessionSummaryScreen(
             totalAciertos: extra['aciertos'] as int? ?? 0,
             totalIntentos: extra['intentos'] as int? ?? 0,
@@ -189,6 +206,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             observaciones: extra['observaciones'] as String?,
             ninoId: extra['ninoId'] as String?,
             planId: extra['planId'] as String?,
+            nivelDificultadRecomendado: extra['nivelRecomendado'] as String?,
+            ajustesDificultad: ajustes,
           );
         },
       ),
@@ -223,7 +242,9 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: '/terapeuta/reportes',
         builder: (context, state) {
           final reporte = state.extra as ReporteAnalitico?;
-          if (reporte == null) return const _PlaceholderScreen(title: 'No hay reporte');
+          if (reporte == null) {
+            return const _PlaceholderScreen(title: 'No hay reporte');
+          }
           return ReporteAnaliticoScreen(reporte: reporte);
         },
       ),
@@ -232,18 +253,38 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/familia/ejecucion',
         builder: (context, state) {
-          // Instancias mockeadas/básicas para inyección en vista
+          // Instancias básicas para inyección en vista
           final localDb = SqliteDbRepository();
-          final apiRepo = ApiSyncRepository(baseUrl: "http://localhost:8000", token: "mock");
-          return EjecucionActividadScreen(
-            registrarUsecase: RegistrarActividadUsecase(localDb),
-            syncUsecase: SyncOfflineUsecase(localDb, apiRepo)
+          final apiRepo = ApiSyncRepository(
+            baseUrl: ApiConstants.baseUrl,
+            tokenProvider: authStorage.getToken,
           );
+          return EjecucionActividadScreen(
+              registrarUsecase: RegistrarActividadUsecase(localDb),
+              syncUsecase: SyncOfflineUsecase(localDb, apiRepo));
         },
       ),
       GoRoute(
         path: '/familia/dashboard',
         builder: (context, state) => const FamiliaDashboardScreen(),
+      ),
+      GoRoute(
+        path: '/padre/scq/resultados',
+        builder: (context, state) {
+          final result = state.extra;
+          if (result is! SCQResult) {
+            return const FamiliaDashboardScreen();
+          }
+          return SCQResultScreen(result: result);
+        },
+      ),
+      GoRoute(
+        path: '/padre/scq/:ninoId',
+        builder: (context, state) {
+          final ninoId = state.pathParameters['ninoId'] ?? '';
+          final name = state.uri.queryParameters['nombre'];
+          return SCQFormScreen(patientId: ninoId, patientName: name);
+        },
       ),
       GoRoute(
         path: '/admin/dashboard',

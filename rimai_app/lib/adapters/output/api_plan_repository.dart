@@ -3,20 +3,37 @@ import 'package:http/http.dart' as http;
 import '../../application/ports/plan_port.dart';
 import '../../domain/entities/therapeutic_plan.dart';
 
+typedef TokenProvider = Future<String?> Function();
+
 class ApiPlanRepository implements IPlanPort {
   final String baseUrl;
-  final String token;
+  final String? token;
+  final TokenProvider? tokenProvider;
 
-  ApiPlanRepository({required this.baseUrl, required this.token});
+  ApiPlanRepository({
+    required this.baseUrl,
+    this.token,
+    this.tokenProvider,
+  });
+
+  Future<Map<String, String>> _jsonAuthHeaders() async {
+    final currentToken = tokenProvider != null ? await tokenProvider!() : token;
+    if (currentToken == null || currentToken.trim().isEmpty) {
+      throw Exception('Sesion no autenticada. Inicia sesion nuevamente.');
+    }
+    return {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer $currentToken',
+    };
+  }
 
   @override
-  Future<TherapeuticPlan> generateSuggestedPlan(int patientId, Map<String, dynamic> perfilSensorial) async {
+  Future<TherapeuticPlan> generateSuggestedPlan(
+      int patientId, Map<String, dynamic> perfilSensorial) async {
+    final headers = await _jsonAuthHeaders();
     final response = await http.post(
       Uri.parse('$baseUrl/api/v1/planes/personalizar'),
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $token',
-      },
+      headers: headers,
       body: jsonEncode({
         'patient_id': patientId,
         'perfil_sensorial': perfilSensorial,
@@ -31,13 +48,12 @@ class ApiPlanRepository implements IPlanPort {
   }
 
   @override
-  Future<TherapeuticPlan> validatePlan(int planId, List<SugerenciaActividad> modificaciones) async {
+  Future<TherapeuticPlan> validatePlan(
+      int planId, List<SugerenciaActividad> modificaciones) async {
+    final headers = await _jsonAuthHeaders();
     final response = await http.put(
       Uri.parse('$baseUrl/api/v1/planes/$planId/validar'),
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $token',
-      },
+      headers: headers,
       body: jsonEncode({
         'modificaciones': modificaciones.map((m) => m.toJson()).toList(),
       }),
