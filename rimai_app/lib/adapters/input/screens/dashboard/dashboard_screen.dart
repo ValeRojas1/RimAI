@@ -133,7 +133,8 @@ class DashboardScreen extends ConsumerWidget {
         const SizedBox(height: 32),
 
         // ── Sección Solicitudes pendientes ──────────────────────────────
-        if (pendienteCount > 0) ..._buildPendientesSection(context, ref, pendienteCount),
+        if (pendienteCount > 0)
+          ..._buildPendientesSection(context, ref, pendienteCount),
         if (pendienteCount > 0) const SizedBox(height: 32),
 
         // ── Sección Pacientes activos ──────────────────────────────────────
@@ -180,7 +181,8 @@ class DashboardScreen extends ConsumerWidget {
     );
   }
 
-  List<Widget> _buildPendientesSection(BuildContext context, WidgetRef ref, int count) {
+  List<Widget> _buildPendientesSection(
+      BuildContext context, WidgetRef ref, int count) {
     return [
       Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
         Row(children: [
@@ -188,13 +190,20 @@ class DashboardScreen extends ConsumerWidget {
           const SizedBox(width: 8),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-            decoration: BoxDecoration(color: _kPrimary, borderRadius: BorderRadius.circular(100)),
-            child: Text('$count', style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+            decoration: BoxDecoration(
+                color: _kPrimary, borderRadius: BorderRadius.circular(100)),
+            child: Text('$count',
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold)),
           ),
         ]),
         GestureDetector(
           onTap: () => context.go('/terapeuta/pendientes'),
-          child: const Text('Ver todos', style: TextStyle(color: _kPrimary, fontSize: 13, fontWeight: FontWeight.bold)),
+          child: const Text('Ver todos',
+              style: TextStyle(
+                  color: _kPrimary, fontSize: 13, fontWeight: FontWeight.bold)),
         ),
       ]),
       const SizedBox(height: 12),
@@ -203,25 +212,32 @@ class DashboardScreen extends ConsumerWidget {
         child: Row(children: [
           const Icon(Icons.pending_actions_rounded, color: _kPrimary, size: 28),
           const SizedBox(width: 14),
-          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(
-              '$count ${count == 1 ? "niño espera" : "niños esperan"} ser vinculado${count == 1 ? "" : "s"}',
-              style: const TextStyle(fontWeight: FontWeight.bold, color: _kText, fontSize: 14),
-            ),
-            const SizedBox(height: 4),
-            const Text('Revisa los expedientes y acepta la vinculación.',
-                style: TextStyle(color: _kSubtext, fontSize: 12)),
-          ])),
+          Expanded(
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                Text(
+                  '$count ${count == 1 ? "niño espera" : "niños esperan"} ser vinculado${count == 1 ? "" : "s"}',
+                  style: const TextStyle(
+                      fontWeight: FontWeight.bold, color: _kText, fontSize: 14),
+                ),
+                const SizedBox(height: 4),
+                const Text('Revisa los expedientes y acepta la vinculación.',
+                    style: TextStyle(color: _kSubtext, fontSize: 12)),
+              ])),
           const SizedBox(width: 10),
           ElevatedButton(
             onPressed: () => context.go('/terapeuta/pendientes'),
             style: ElevatedButton.styleFrom(
-              backgroundColor: _kPrimary, foregroundColor: Colors.white,
+              backgroundColor: _kPrimary,
+              foregroundColor: Colors.white,
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10)),
               elevation: 0,
             ),
-            child: const Text('Revisar', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+            child: const Text('Revisar',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
           ),
         ]),
       ),
@@ -335,6 +351,11 @@ class DashboardScreen extends ConsumerWidget {
             if (firstPatient != null)
               context.go('/terapeuta/plan/${firstPatient.id}');
           },
+        ),
+        _QuickAccessButton(
+          label: 'Actividades',
+          icon: Icons.fact_check_outlined,
+          onTap: () => context.go('/terapeuta/actividades'),
         ),
         _QuickAccessButton(
           label: 'Ver progreso',

@@ -21,6 +21,8 @@ class SessionSummaryScreen extends ConsumerWidget {
   final String? observaciones;
   final String? ninoId;
   final String? planId;
+  final String? nivelDificultadRecomendado;
+  final List<Map<String, dynamic>> ajustesDificultad;
 
   const SessionSummaryScreen({
     super.key,
@@ -32,6 +34,8 @@ class SessionSummaryScreen extends ConsumerWidget {
     this.observaciones,
     this.ninoId,
     this.planId,
+    this.nivelDificultadRecomendado,
+    this.ajustesDificultad = const [],
   });
 
   @override
@@ -48,13 +52,26 @@ class SessionSummaryScreen extends ConsumerWidget {
     final tiempoStr =
         '${minutos.toString().padLeft(2, '0')}:${segundos.toString().padLeft(2, '0')}';
 
-    final nivelRecomendado = tasa >= 0.85
-        ? 'Medio'
-        : tasa >= 0.5
-            ? 'Bajo'
-            : 'Bajo';
-    final nivelLabel =
-        tasa >= 0.85 ? '↑ Aumentar dificultad' : 'Mantener nivel actual';
+    final nivelRecomendado = tasa >= 0.8 ? 'Medio' : 'Bajo';
+
+    final ajuste =
+        ajustesDificultad.isNotEmpty ? ajustesDificultad.first : null;
+    final nivelSugerido = ajuste?['dificultad_sugerida']?.toString() ??
+        nivelDificultadRecomendado ??
+        nivelRecomendado;
+    final accionAjuste = ajuste?['accion']?.toString() ?? '';
+    final dificultadActual =
+        ajuste?['dificultad_actual']?.toString() ?? 'nivel actual';
+    final muestras = (ajuste?['muestras'] as num?)?.toInt() ?? 0;
+    final tasaAjuste = (ajuste?['tasa_aciertos'] as num?)?.toDouble() ?? tasa;
+    final ajusteTitle = ajuste == null
+        ? 'Sin ajuste automatico'
+        : accionAjuste == 'reducir'
+            ? 'Reducir dificultad'
+            : 'Aumentar dificultad';
+    final ajusteLabel = ajuste == null
+        ? 'Se requieren resultados previos o cruzar los umbrales 80% / 40%.'
+        : '$dificultadActual -> $nivelSugerido registrado con ${(tasaAjuste * 100).toStringAsFixed(0)}% en $muestras resultados recientes.';
 
     return Scaffold(
       backgroundColor: _kBg,
@@ -79,7 +96,7 @@ class SessionSummaryScreen extends ConsumerWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // ── Encabezado ──────────────────────────────────────────────────
-            Text(
+            const Text(
               'Sesión completada',
               style: TextStyle(color: _kSubtext, fontSize: 14),
             ),
@@ -108,7 +125,7 @@ class SessionSummaryScreen extends ConsumerWidget {
                     ),
                   ),
                   const SizedBox(height: 8),
-                  Text(
+                  const Text(
                     'Tasa de Aciertos',
                     style: TextStyle(color: _kSubtext, fontSize: 16),
                   ),
@@ -189,7 +206,7 @@ class SessionSummaryScreen extends ConsumerWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text(
-                    'RECOMENDACIÓN IA-01',
+                    'AJUSTE AUTOMATICO',
                     style: TextStyle(
                         fontSize: 10,
                         fontWeight: FontWeight.bold,
@@ -198,7 +215,7 @@ class SessionSummaryScreen extends ConsumerWidget {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Nivel recomendado: $nivelRecomendado',
+                    ajusteTitle,
                     style: const TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
@@ -206,7 +223,7 @@ class SessionSummaryScreen extends ConsumerWidget {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    nivelLabel,
+                    ajusteLabel,
                     style:
                         const TextStyle(color: Color(0xFFB3CDB4), fontSize: 14),
                   ),

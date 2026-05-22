@@ -23,6 +23,16 @@ Map<String, dynamic> _toMap(dynamic raw) {
       'Respuesta inesperada del servidor. Tipo: ${raw.runtimeType}');
 }
 
+Map<String, dynamic> _optionalMap(dynamic raw) {
+  if (raw == null) return {};
+  return _toMap(raw);
+}
+
+List<String> _stringList(dynamic raw) {
+  if (raw is List) return raw.map((e) => e.toString()).toList();
+  return [];
+}
+
 class UltimaSesion {
   final DateTime? fecha;
   final double? tasaAciertos;
@@ -46,22 +56,50 @@ class UltimaSesion {
 class PacienteDashboard {
   final String id;
   final String nombre;
+  final String? fechaNacimiento;
   final int edad;
   final String nivelCognitivo;
+  final String? diagnostico;
   final String? planActivo;
   final String? planActivoId;
   final UltimaSesion? ultimaSesion;
   final String estadoClinico;
+  final Map<String, dynamic> hitos;
+  final Map<String, dynamic> sensorial;
+  final List<String> intereses;
+  final Map<String, dynamic> estimulosAversivos;
+  final List<String> rutinasRegulacion;
+  final Map<String, dynamic> documentosClinicos;
+  final String? medicacionActual;
+  final bool requiereScq;
+  final bool scqCompletado;
+  final bool scqAutorizadoEnvio;
+  final int? scqPuntaje;
+  final String? scqNivel;
 
   PacienteDashboard({
     required this.id,
     required this.nombre,
+    this.fechaNacimiento,
     required this.edad,
     required this.nivelCognitivo,
+    this.diagnostico,
     this.planActivo,
     this.planActivoId,
     this.ultimaSesion,
     this.estadoClinico = 'pendiente_asignacion',
+    this.hitos = const {},
+    this.sensorial = const {},
+    this.intereses = const [],
+    this.estimulosAversivos = const {},
+    this.rutinasRegulacion = const [],
+    this.documentosClinicos = const {},
+    this.medicacionActual,
+    this.requiereScq = false,
+    this.scqCompletado = false,
+    this.scqAutorizadoEnvio = false,
+    this.scqPuntaje,
+    this.scqNivel,
   });
 
   factory PacienteDashboard.fromJson(dynamic raw) {
@@ -69,14 +107,28 @@ class PacienteDashboard {
     return PacienteDashboard(
       id: j['id']?.toString() ?? '',
       nombre: j['nombre']?.toString() ?? '',
+      fechaNacimiento: j['fecha_nacimiento']?.toString(),
       edad: (j['edad'] as num?)?.toInt() ?? 0,
       nivelCognitivo: j['nivel_cognitivo']?.toString() ?? '',
+      diagnostico: j['diagnostico']?.toString(),
       planActivo: j['plan_activo']?.toString(),
       planActivoId: j['plan_activo_id']?.toString(),
       ultimaSesion: j['ultima_sesion'] != null
           ? UltimaSesion.fromJson(j['ultima_sesion'])
           : null,
       estadoClinico: j['estado_clinico']?.toString() ?? 'pendiente_asignacion',
+      hitos: _optionalMap(j['hitos']),
+      sensorial: _optionalMap(j['sensorial']),
+      intereses: _stringList(j['intereses']),
+      estimulosAversivos: _optionalMap(j['estimulos_aversivos']),
+      rutinasRegulacion: _stringList(j['rutinas_regulacion']),
+      documentosClinicos: _optionalMap(j['documentos_clinicos']),
+      medicacionActual: j['medicacion_actual']?.toString(),
+      requiereScq: j['requiere_scq'] == true,
+      scqCompletado: j['scq_completado'] == true,
+      scqAutorizadoEnvio: j['scq_autorizado_envio'] == true,
+      scqPuntaje: (j['scq_puntaje'] as num?)?.toInt(),
+      scqNivel: j['scq_nivel']?.toString(),
     );
   }
 }
@@ -115,7 +167,6 @@ class DashboardData {
     );
   }
 }
-
 
 // ── Niño pendiente (bandeja del terapeuta) ───────────────────────────────────
 class NinoPendiente {
@@ -168,6 +219,7 @@ class ActividadPlan {
   final String? instrucciones;
   final String nivelDificultad;
   final int? duracionEstimada;
+  final List<String> materiales;
 
   ActividadPlan({
     required this.id,
@@ -176,6 +228,7 @@ class ActividadPlan {
     this.instrucciones,
     required this.nivelDificultad,
     this.duracionEstimada,
+    this.materiales = const [],
   });
 
   factory ActividadPlan.fromJson(dynamic raw) {
@@ -187,6 +240,43 @@ class ActividadPlan {
       instrucciones: j['instrucciones']?.toString(),
       nivelDificultad: j['nivel_dificultad']?.toString() ?? 'Medio',
       duracionEstimada: (j['duracion_estimada'] as num?)?.toInt(),
+      materiales: _stringList(j['materiales']),
+    );
+  }
+}
+
+class ActividadCatalogo {
+  final String id;
+  final String nombre;
+  final String categoria;
+  final String nivelDificultad;
+  final int duracionEstimada;
+  final List<String> materiales;
+  final String instrucciones;
+  final bool asociado;
+
+  ActividadCatalogo({
+    required this.id,
+    required this.nombre,
+    required this.categoria,
+    required this.nivelDificultad,
+    required this.duracionEstimada,
+    required this.materiales,
+    required this.instrucciones,
+    this.asociado = false,
+  });
+
+  factory ActividadCatalogo.fromJson(dynamic raw) {
+    final j = _toMap(raw);
+    return ActividadCatalogo(
+      id: j['id']?.toString() ?? '',
+      nombre: j['nombre']?.toString() ?? '',
+      categoria: (j['categoria'] ?? j['tipo'])?.toString() ?? '',
+      nivelDificultad: j['nivel_dificultad']?.toString() ?? 'Medio',
+      duracionEstimada: (j['duracion_estimada'] as num?)?.toInt() ?? 0,
+      materiales: _stringList(j['materiales']),
+      instrucciones: j['instrucciones']?.toString() ?? '',
+      asociado: j['asociado'] == true,
     );
   }
 }
@@ -246,6 +336,46 @@ class DashboardService {
     return PlanData.fromJson(response.data);
   }
 
+  Future<List<ActividadCatalogo>> listarActividades({String? planId}) async {
+    try {
+      final response = await _dio.get(
+        '/api/dashboard/terapeuta/actividades',
+        queryParameters: {
+          if (planId != null) 'plan_id': planId,
+        },
+      );
+      final list = response.data as List? ?? [];
+      return list.map((e) => ActividadCatalogo.fromJson(e)).toList();
+    } on DioException catch (e) {
+      throw Exception(_extractDetail(e, 'Error al cargar actividades.'));
+    }
+  }
+
+  Future<ActividadCatalogo> crearActividad(Map<String, dynamic> datos) async {
+    try {
+      final response = await _dio.post(
+        '/api/dashboard/terapeuta/actividades',
+        data: datos,
+      );
+      return ActividadCatalogo.fromJson(response.data);
+    } on DioException catch (e) {
+      throw Exception(_extractDetail(e, 'Error al registrar la actividad.'));
+    }
+  }
+
+  Future<void> asociarActividadAPlan({
+    required String planId,
+    required String actividadId,
+  }) async {
+    try {
+      await _dio.post(
+        '/api/dashboard/terapeuta/planes/$planId/actividades/$actividadId',
+      );
+    } on DioException catch (e) {
+      throw Exception(_extractDetail(e, 'Error al asociar la actividad.'));
+    }
+  }
+
   Future<DashboardData> obtenerResumenFamilia() async {
     try {
       final response = await _dio.get('/api/dashboard/familia/resumen');
@@ -281,12 +411,35 @@ class DashboardService {
     }
   }
 
-  Future<Map<String, dynamic>> guardarPerfilNino(Map<String, dynamic> datos) async {
+  Future<Map<String, dynamic>> guardarPerfilNino(
+      Map<String, dynamic> datos) async {
     try {
-      final response = await _dio.post('/api/dashboard/familia/paciente', data: datos);
+      final response =
+          await _dio.post('/api/dashboard/familia/paciente', data: datos);
       return (response.data as Map).cast<String, dynamic>();
     } on DioException catch (e) {
       throw Exception(_extractDetail(e, 'Error al registrar el paciente.'));
+    }
+  }
+
+  Future<Map<String, dynamic>> actualizarPerfilNino(
+      String ninoId, Map<String, dynamic> datos) async {
+    try {
+      final response = await _dio.patch(
+        '/api/dashboard/familia/paciente/$ninoId',
+        data: datos,
+      );
+      return (response.data as Map).cast<String, dynamic>();
+    } on DioException catch (e) {
+      throw Exception(_extractDetail(e, 'Error al actualizar el paciente.'));
+    }
+  }
+
+  Future<void> eliminarPerfilNino(String ninoId) async {
+    try {
+      await _dio.delete('/api/dashboard/familia/paciente/$ninoId');
+    } on DioException catch (e) {
+      throw Exception(_extractDetail(e, 'Error al eliminar el paciente.'));
     }
   }
 
@@ -311,8 +464,8 @@ class DashboardService {
       final detail = e.response?.data?['detail'];
       if (detail is Map) {
         // 422 — perfil no listo (detail es un dict estructurado)
-        throw Exception(
-            detail['mensaje'] as String? ?? 'El perfil no está listo para generar el plan.');
+        throw Exception(detail['mensaje'] as String? ??
+            'El perfil no está listo para generar el plan.');
       }
       throw Exception(_extractDetail(e, 'Error al generar plan con IA.'));
     }
@@ -331,7 +484,8 @@ class DashboardService {
 
   Future<Map<String, dynamic>> vincularPorId(String ninoId) async {
     try {
-      final response = await _dio.post('/api/dashboard/terapeuta/vincular/$ninoId');
+      final response =
+          await _dio.post('/api/dashboard/terapeuta/vincular/$ninoId');
       return (response.data as Map).cast<String, dynamic>();
     } on DioException catch (e) {
       throw Exception(_extractDetail(e, 'Error al vincular el paciente.'));
@@ -341,10 +495,40 @@ class DashboardService {
   Future<Map<String, dynamic>> completarPerfilClinico(
       String ninoId, Map<String, dynamic> datos) async {
     try {
-      final response = await _dio.patch('/api/ninos/$ninoId/perfil-clinico', data: datos);
+      final response =
+          await _dio.patch('/api/ninos/$ninoId/perfil-clinico', data: datos);
       return (response.data as Map).cast<String, dynamic>();
     } on DioException catch (e) {
       throw Exception(_extractDetail(e, 'Error al guardar el perfil clínico.'));
+    }
+  }
+
+  Future<void> enviarCasoScqATerapeuta(String ninoId) async {
+    try {
+      await _dio.post('/api/v1/admision/$ninoId/enviar-terapeuta');
+    } on DioException catch (e) {
+      throw Exception(
+          _extractDetail(e, 'Error al enviar el caso al terapeuta.'));
+    }
+  }
+
+  Future<void> subirDocumentoClinico({
+    required String ninoId,
+    required String tipo,
+    required String path,
+    required String fileName,
+  }) async {
+    try {
+      final formData = FormData.fromMap({
+        'tipo': tipo,
+        'file': await MultipartFile.fromFile(path, filename: fileName),
+      });
+      await _dio.post(
+        '/api/dashboard/familia/paciente/$ninoId/documento',
+        data: formData,
+      );
+    } on DioException catch (e) {
+      throw Exception(_extractDetail(e, 'Error al adjuntar el documento.'));
     }
   }
 }
@@ -387,11 +571,13 @@ final dashboardServiceProvider = Provider<DashboardService>((ref) {
   return DashboardService(ref.read(dioProvider));
 });
 
-final dashboardProvider = FutureProvider.autoDispose<DashboardData>((ref) async {
+final dashboardProvider =
+    FutureProvider.autoDispose<DashboardData>((ref) async {
   return ref.read(dashboardServiceProvider).obtenerResumen();
 });
 
-final familiaDashboardProvider = FutureProvider.autoDispose<DashboardData>((ref) async {
+final familiaDashboardProvider =
+    FutureProvider.autoDispose<DashboardData>((ref) async {
   return ref.read(dashboardServiceProvider).obtenerResumenFamilia();
 });
 
@@ -400,7 +586,13 @@ final planActivoProvider =
   return ref.read(dashboardServiceProvider).obtenerPlanActivo(ninoId);
 });
 
+final actividadesCatalogoProvider = FutureProvider.autoDispose
+    .family<List<ActividadCatalogo>, String?>((ref, planId) {
+  return ref.read(dashboardServiceProvider).listarActividades(planId: planId);
+});
+
 /// Bandeja de espera: niños sin terapeuta asignado visibles para cualquier terapeuta.
-final pendientesProvider = FutureProvider.autoDispose<List<NinoPendiente>>((ref) async {
+final pendientesProvider =
+    FutureProvider.autoDispose<List<NinoPendiente>>((ref) async {
   return ref.read(dashboardServiceProvider).obtenerPendientes();
 });

@@ -124,6 +124,24 @@ class TherapeuticPlanScreen extends ConsumerWidget {
                             style:
                                 const TextStyle(color: _kSubtext, height: 1.4),
                           ),
+                          if (actividad.materiales.isNotEmpty) ...[
+                            const SizedBox(height: 12),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: actividad.materiales
+                                  .map(
+                                    (m) => Chip(
+                                      label: Text(m),
+                                      visualDensity: VisualDensity.compact,
+                                      backgroundColor:
+                                          _kAction.withOpacity(0.35),
+                                      side: BorderSide.none,
+                                    ),
+                                  )
+                                  .toList(),
+                            ),
+                          ],
                           const SizedBox(height: 16),
                           Row(
                             children: [

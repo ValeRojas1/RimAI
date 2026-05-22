@@ -103,8 +103,9 @@ class _ActiveSessionScreenState extends ConsumerState<ActiveSessionScreen> {
         onTap: (index) {
           if (index == 0) context.go('/terapeuta/dashboard');
           if (index == 2 && ninoId != null) context.go('/terapeuta/ia/$ninoId');
-          if (index == 3 && ninoId != null)
+          if (index == 3 && ninoId != null) {
             context.go('/terapeuta/progreso/$ninoId');
+          }
         },
         items: [
           BottomNavItem(icon: Icons.home, label: 'Inicio'),
@@ -376,17 +377,18 @@ class _ActiveSessionScreenState extends ConsumerState<ActiveSessionScreen> {
   Future<void> _finalizar(PlanData plan, ActividadPlan actividad) async {
     setState(() => _saving = true);
     try {
-      await ref.read(sesionServiceProvider).guardarResultadoActividad(
-            ninoId: plan.ninoId,
-            planId: plan.id,
-            actividadId: actividad.id,
-            aciertos: _aciertos,
-            intentos: _intentos,
-            segundos: _secondsElapsed,
-            nivelAyuda: _currentAssistLevel,
-            nivelDificultadUsado: _nivelUsado,
-            observaciones: _observacionController.text.trim(),
-          );
+      final resultado =
+          await ref.read(sesionServiceProvider).guardarResultadoActividad(
+                ninoId: plan.ninoId,
+                planId: plan.id,
+                actividadId: actividad.id,
+                aciertos: _aciertos,
+                intentos: _intentos,
+                segundos: _secondsElapsed,
+                nivelAyuda: _currentAssistLevel,
+                nivelDificultadUsado: _nivelUsado,
+                observaciones: _observacionController.text.trim(),
+              );
       _timer?.cancel();
       if (!mounted) return;
       context.go('/terapeuta/sesion/resumen', extra: {
@@ -398,6 +400,9 @@ class _ActiveSessionScreenState extends ConsumerState<ActiveSessionScreen> {
         'observaciones': _observacionController.text.trim(),
         'ninoId': plan.ninoId,
         'planId': plan.id,
+        'nivelRecomendado':
+            resultado['nivel_dificultad_recomendado']?.toString(),
+        'ajustesDificultad': resultado['ajustes_dificultad'],
       });
     } finally {
       if (mounted) setState(() => _saving = false);

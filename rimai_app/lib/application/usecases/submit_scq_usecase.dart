@@ -6,10 +6,16 @@ class SubmitSCQUsecase {
 
   SubmitSCQUsecase(this.scqPort);
 
-  Future<SCQResult> execute(int patientId, List<int> respuestas, bool aceptoDisclaimer) async {
+  Future<SCQResult> execute(
+      String patientId, List<int> respuestas, bool aceptoDisclaimer) async {
     if (!aceptoDisclaimer) {
-      throw Exception('Debe aceptar la advertencia legal obligatoria (RNF-10).');
+      throw Exception(
+          'Debe aceptar la advertencia legal obligatoria (RNF-10).');
     }
     return await scqPort.submitSCQ(patientId, respuestas, aceptoDisclaimer);
+  }
+
+  Future<void> enviarCasoATerapeuta(String patientId) {
+    return scqPort.enviarCasoATerapeuta(patientId);
   }
 }

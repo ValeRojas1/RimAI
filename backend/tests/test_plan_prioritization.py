@@ -1,6 +1,6 @@
 import pytest
 from app.application.usecases.ai_support_usecases import AISupportUseCases
-from app.domain.entities.ai_support import SupportLevel
+from app.domain.entities.support_level import SupportLevel
 
 def test_prioritization_scq_alto():
     uc = AISupportUseCases()
