@@ -21,7 +21,12 @@ import 'package:rimai_app/adapters/input/screens/dashboard/pending_patients_scre
 import 'package:rimai_app/adapters/input/screens/terapeuta/therapist_inbox_screen.dart';
 import 'package:rimai_app/adapters/input/screens/terapeuta/reporte_analitico_screen.dart';
 import 'package:rimai_app/adapters/input/screens/terapeuta/activities_catalog_screen.dart';
+import 'package:rimai_app/adapters/input/screens/terapeuta/plan_builder_screen.dart';
+import 'package:rimai_app/adapters/input/screens/terapeuta/therapist_patient_selector_screen.dart';
+import 'package:rimai_app/adapters/input/screens/familia/family_activity_session_screen.dart';
+import 'package:rimai_app/adapters/input/screens/familia/family_plan_screen.dart';
 import 'package:rimai_app/adapters/input/screens/familia/ejecucion_actividad_screen.dart';
+import 'package:rimai_app/adapters/input/screens/familia/family_chatbot_screen.dart';
 import 'package:rimai_app/domain/entities/reporte.dart';
 import 'package:rimai_app/application/usecases/registrar_actividad_usecase.dart';
 import 'package:rimai_app/application/usecases/sync_offline_usecase.dart';
@@ -126,7 +131,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: '/terapeuta/nino/:ninoId',
         builder: (context, state) {
           final ninoId = state.pathParameters['ninoId'] ?? '1';
-          return TherapeuticProfileScreen(ninoId: ninoId);
+          return TherapeuticProfileScreen(
+            ninoId: ninoId,
+            editMode: state.uri.queryParameters['editarPerfil'] == 'true',
+          );
         },
       ),
       GoRoute(
@@ -135,11 +143,23 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             '/terapeuta/nino/${state.pathParameters['ninoId']}',
       ),
       GoRoute(
+        path: '/terapeuta/planes',
+        builder: (context, state) => const TherapistPatientSelectorScreen(
+          destination: TherapistPatientDestination.plan,
+        ),
+      ),
+      GoRoute(
         path: '/terapeuta/plan/:ninoId',
         builder: (context, state) {
           final ninoId = state.pathParameters['ninoId'] ?? '1';
           return TherapeuticPlanScreen(ninoId: ninoId);
         },
+      ),
+      GoRoute(
+        path: '/terapeuta/ia',
+        builder: (context, state) => const TherapistPatientSelectorScreen(
+          destination: TherapistPatientDestination.apoyo,
+        ),
       ),
       GoRoute(
         path: '/terapeuta/ia/:ninoId',
@@ -168,25 +188,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const ActiveSessionScreen(sesionId: '1'),
       ),
       GoRoute(
-        path: '/terapeuta/sesion/:sesionId',
-        builder: (context, state) {
-          final sesionId = state.pathParameters['sesionId'] ?? '1';
-          return ActiveSessionScreen(sesionId: sesionId);
-        },
-      ),
-      GoRoute(
-        path: '/terapeuta/actividad/:actividadId',
-        builder: (context, state) {
-          final actividadId = state.pathParameters['actividadId'] ?? '';
-          return ActiveSessionScreen(
-            sesionId: actividadId,
-            actividadId: actividadId,
-            ninoId: state.uri.queryParameters['ninoId'],
-            planId: state.uri.queryParameters['planId'],
-          );
-        },
-      ),
-      GoRoute(
         path: '/terapeuta/sesion/resumen',
         builder: (context, state) {
           final extra = state.extra as Map<String, dynamic>? ?? {};
@@ -206,14 +207,38 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             observaciones: extra['observaciones'] as String?,
             ninoId: extra['ninoId'] as String?,
             planId: extra['planId'] as String?,
+            sesionId: extra['sesionId'] as String?,
+            sesionNumero: extra['sesionNumero'] as int?,
             nivelDificultadRecomendado: extra['nivelRecomendado'] as String?,
             ajustesDificultad: ajustes,
           );
         },
       ),
       GoRoute(
+        path: '/terapeuta/sesion/:sesionId',
+        builder: (context, state) {
+          final sesionId = state.pathParameters['sesionId'] ?? '1';
+          return ActiveSessionScreen(sesionId: sesionId);
+        },
+      ),
+      GoRoute(
+        path: '/terapeuta/actividad/:actividadId',
+        builder: (context, state) {
+          final actividadId = state.pathParameters['actividadId'] ?? '';
+          return ActiveSessionScreen(
+            sesionId: actividadId,
+            actividadId: actividadId,
+            ninoId: state.uri.queryParameters['ninoId'],
+            planId: state.uri.queryParameters['planId'],
+            previewOnly: true,
+          );
+        },
+      ),
+      GoRoute(
         path: '/terapeuta/progreso',
-        builder: (context, state) => const ProgressScreen(ninoId: '1'),
+        builder: (context, state) => const TherapistPatientSelectorScreen(
+          destination: TherapistPatientDestination.progreso,
+        ),
       ),
       GoRoute(
         path: '/terapeuta/progreso/:ninoId',
@@ -239,6 +264,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const TherapistInboxScreen(),
       ),
       GoRoute(
+        path: '/terapeuta/plan_builder',
+        builder: (context, state) {
+          final ninoId = state.uri.queryParameters['ninoId'] ?? '';
+          final patientName = state.uri.queryParameters['nombre'] ?? 'Paciente';
+          return PlanBuilderScreen(ninoId: ninoId, patientName: patientName);
+        },
+      ),
+      GoRoute(
         path: '/terapeuta/reportes',
         builder: (context, state) {
           final reporte = state.extra as ReporteAnalitico?;
@@ -250,6 +283,52 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       ),
 
       // ── Familia / Admin ────────────────────────────────────────────────────
+      GoRoute(
+        path: '/familia/plan/:ninoId',
+        builder: (context, state) {
+          final ninoId = state.pathParameters['ninoId'] ?? '';
+          return FamilyPlanScreen(ninoId: ninoId);
+        },
+      ),
+      GoRoute(
+        path: '/familia/actividad/:actividadId',
+        builder: (context, state) {
+          final actividadId = state.pathParameters['actividadId'] ?? '';
+          return FamilyActivitySessionScreen(
+            actividadId: actividadId,
+            ninoId: state.uri.queryParameters['ninoId'] ?? '',
+            planId: state.uri.queryParameters['planId'] ?? '',
+          );
+        },
+      ),
+      GoRoute(
+        path: '/familia/sesion/resumen',
+        builder: (context, state) {
+          final extra = state.extra as Map<String, dynamic>? ?? {};
+          final ajustesRaw = extra['ajustesDificultad'];
+          final ajustes = ajustesRaw is List
+              ? ajustesRaw
+                  .whereType<Map>()
+                  .map((item) => item.cast<String, dynamic>())
+                  .toList()
+              : <Map<String, dynamic>>[];
+          return SessionSummaryScreen(
+            totalAciertos: extra['aciertos'] as int? ?? 0,
+            totalIntentos: extra['intentos'] as int? ?? 0,
+            segundosTranscurridos: extra['segundos'] as int? ?? 0,
+            nivelAyuda: extra['nivelAyuda'] as String? ?? 'Ninguna',
+            ninoNombre: extra['ninoNombre'] as String? ?? 'Paciente',
+            observaciones: extra['observaciones'] as String?,
+            ninoId: extra['ninoId'] as String?,
+            planId: extra['planId'] as String?,
+            sesionId: extra['sesionId'] as String?,
+            sesionNumero: extra['sesionNumero'] as int?,
+            nivelDificultadRecomendado: extra['nivelRecomendado'] as String?,
+            ajustesDificultad: ajustes,
+            permitirAplicarSugerencia: false,
+          );
+        },
+      ),
       GoRoute(
         path: '/familia/ejecucion',
         builder: (context, state) {
@@ -267,6 +346,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/familia/dashboard',
         builder: (context, state) => const FamiliaDashboardScreen(),
+      ),
+      GoRoute(
+        path: '/familia/chatbot',
+        builder: (context, state) => const FamilyChatbotScreen(),
       ),
       GoRoute(
         path: '/padre/scq/resultados',

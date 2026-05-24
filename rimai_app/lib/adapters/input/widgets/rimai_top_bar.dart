@@ -1,5 +1,6 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
 class RimAITopBar extends StatelessWidget implements PreferredSizeWidget {
   final String title;
@@ -19,6 +20,23 @@ class RimAITopBar extends StatelessWidget implements PreferredSizeWidget {
 
   @override
   Widget build(BuildContext context) {
+    void defaultBack() {
+      if (Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+    }
+
+    void goHome() {
+      final path = GoRouterState.of(context).uri.path;
+      if (path.startsWith('/familia')) {
+        context.go('/familia/dashboard');
+      } else if (path.startsWith('/admin')) {
+        context.go('/admin/dashboard');
+      } else {
+        context.go('/terapeuta/dashboard');
+      }
+    }
+
     return ClipRRect(
       child: BackdropFilter(
         filter: ImageFilter.blur(sigmaX: 20.0, sigmaY: 20.0),
@@ -30,10 +48,10 @@ class RimAITopBar extends StatelessWidget implements PreferredSizeWidget {
             right: 24,
           ),
           decoration: BoxDecoration(
-            color: const Color(0xFFFFF8F2).withOpacity(0.7),
+            color: const Color(0xFFFFF8F2).withValues(alpha: 0.7),
             boxShadow: [
               BoxShadow(
-                color: const Color(0xFF58423B).withOpacity(0.08),
+                color: const Color(0xFF58423B).withValues(alpha: 0.08),
                 blurRadius: 40,
                 offset: const Offset(0, 4),
               ),
@@ -47,7 +65,7 @@ class RimAITopBar extends StatelessWidget implements PreferredSizeWidget {
                   IconButton(
                     icon: Icon(leadingIcon, color: iconColor),
                     tooltip: title,
-                    onPressed: onLeadingPressed,
+                    onPressed: onLeadingPressed ?? defaultBack,
                   ),
                   const SizedBox(width: 8),
                   Text(
@@ -63,10 +81,13 @@ class RimAITopBar extends StatelessWidget implements PreferredSizeWidget {
               if (trailingWidget != null)
                 trailingWidget!
               else
-                const CircleAvatar(
-                  radius: 20,
-                  backgroundColor: Color(0xFFE9E1D8),
-                  child: Icon(Icons.person, color: Color(0xFF58423B)),
+                IconButton(
+                  tooltip: 'Inicio',
+                  icon: const Icon(
+                    Icons.home_rounded,
+                    color: Color(0xFF58423B),
+                  ),
+                  onPressed: goHome,
                 ),
             ],
           ),

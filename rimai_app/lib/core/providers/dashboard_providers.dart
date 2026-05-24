@@ -62,6 +62,7 @@ class PacienteDashboard {
   final String? diagnostico;
   final String? planActivo;
   final String? planActivoId;
+  final String? planEstado;
   final UltimaSesion? ultimaSesion;
   final String estadoClinico;
   final Map<String, dynamic> hitos;
@@ -86,6 +87,7 @@ class PacienteDashboard {
     this.diagnostico,
     this.planActivo,
     this.planActivoId,
+    this.planEstado,
     this.ultimaSesion,
     this.estadoClinico = 'pendiente_asignacion',
     this.hitos = const {},
@@ -113,6 +115,7 @@ class PacienteDashboard {
       diagnostico: j['diagnostico']?.toString(),
       planActivo: j['plan_activo']?.toString(),
       planActivoId: j['plan_activo_id']?.toString(),
+      planEstado: j['plan_estado']?.toString(),
       ultimaSesion: j['ultima_sesion'] != null
           ? UltimaSesion.fromJson(j['ultima_sesion'])
           : null,
@@ -179,6 +182,16 @@ class NinoPendiente {
   final String? comunicacion;
   final List<String> intereses;
   final String? tutorNombre;
+  final Map<String, dynamic> documentosClinicos;
+  final String? medicacionActual;
+  final bool requiereScq;
+  final bool scqCompletado;
+  final int? scqPuntaje;
+  final String? scqNivel;
+  final Map<String, dynamic> hitos;
+  final Map<String, dynamic> estimulosAversivos;
+  final List<String> rutinasRegulacion;
+  final Map<String, dynamic> sensorialFamilia;
 
   NinoPendiente({
     required this.id,
@@ -190,6 +203,16 @@ class NinoPendiente {
     this.comunicacion,
     this.intereses = const [],
     this.tutorNombre,
+    this.documentosClinicos = const {},
+    this.medicacionActual,
+    this.requiereScq = false,
+    this.scqCompletado = false,
+    this.scqPuntaje,
+    this.scqNivel,
+    this.hitos = const {},
+    this.estimulosAversivos = const {},
+    this.rutinasRegulacion = const [],
+    this.sensorialFamilia = const {},
   });
 
   factory NinoPendiente.fromJson(dynamic raw) {
@@ -208,6 +231,16 @@ class NinoPendiente {
           ? (j['intereses'] as List).map((e) => e.toString()).toList()
           : [],
       tutorNombre: j['tutor_nombre']?.toString(),
+      documentosClinicos: _optionalMap(j['documentos_clinicos']),
+      medicacionActual: j['medicacion_actual']?.toString(),
+      requiereScq: j['requiere_scq'] == true,
+      scqCompletado: j['scq_completado'] == true,
+      scqPuntaje: (j['scq_puntaje'] as num?)?.toInt(),
+      scqNivel: j['scq_nivel']?.toString(),
+      hitos: _optionalMap(j['hitos']),
+      estimulosAversivos: _optionalMap(j['estimulos_aversivos']),
+      rutinasRegulacion: _stringList(j['rutinas_regulacion']),
+      sensorialFamilia: _optionalMap(j['sensorial_familia']),
     );
   }
 }
@@ -218,8 +251,12 @@ class ActividadPlan {
   final String tipo;
   final String? instrucciones;
   final String nivelDificultad;
+  final String nivelCatalogo;
   final int? duracionEstimada;
   final List<String> materiales;
+  final String modoEjecucion;
+  final bool requiereAcompanamiento;
+  final bool completada;
 
   ActividadPlan({
     required this.id,
@@ -227,8 +264,12 @@ class ActividadPlan {
     required this.tipo,
     this.instrucciones,
     required this.nivelDificultad,
+    this.nivelCatalogo = 'Medio',
     this.duracionEstimada,
     this.materiales = const [],
+    this.modoEjecucion = 'acompanada',
+    this.requiereAcompanamiento = true,
+    this.completada = false,
   });
 
   factory ActividadPlan.fromJson(dynamic raw) {
@@ -239,8 +280,14 @@ class ActividadPlan {
       tipo: j['tipo']?.toString() ?? '',
       instrucciones: j['instrucciones']?.toString(),
       nivelDificultad: j['nivel_dificultad']?.toString() ?? 'Medio',
+      nivelCatalogo: j['nivel_catalogo']?.toString() ??
+          j['nivel_dificultad']?.toString() ??
+          'Medio',
       duracionEstimada: (j['duracion_estimada'] as num?)?.toInt(),
       materiales: _stringList(j['materiales']),
+      modoEjecucion: j['modo_ejecucion']?.toString() ?? 'acompanada',
+      requiereAcompanamiento: j['requiere_acompanamiento'] != false,
+      completada: j['completada'] == true,
     );
   }
 }
@@ -287,7 +334,13 @@ class PlanData {
   final String ninoId;
   final String ninoNombre;
   final String nivelDificultadActual;
+  final String estadoPlan;
+  final bool publicadoParaTutor;
+  final int limiteActividades;
+  final int limiteDuracionSegundos;
+  final int? nivelTeaValidado;
   final List<ActividadPlan> actividades;
+  final int sesionNumero;
 
   PlanData({
     required this.id,
@@ -295,7 +348,13 @@ class PlanData {
     required this.ninoId,
     required this.ninoNombre,
     required this.nivelDificultadActual,
+    this.estadoPlan = 'borrador',
+    this.publicadoParaTutor = false,
+    this.limiteActividades = 3,
+    this.limiteDuracionSegundos = 3600,
+    this.nivelTeaValidado,
     required this.actividades,
+    this.sesionNumero = 1,
   });
 
   factory PlanData.fromJson(dynamic raw) {
@@ -307,11 +366,45 @@ class PlanData {
       ninoNombre: j['nino_nombre']?.toString() ?? 'Paciente',
       nivelDificultadActual:
           j['nivel_dificultad_actual']?.toString() ?? 'Medio',
+      estadoPlan: j['estado_plan']?.toString() ?? 'borrador',
+      publicadoParaTutor: j['publicado_para_tutor'] == true,
+      limiteActividades: (j['limite_actividades'] as num?)?.toInt() ?? 3,
+      limiteDuracionSegundos:
+          (j['limite_duracion_segundos'] as num?)?.toInt() ?? 3600,
+      nivelTeaValidado: (j['nivel_tea_validado'] as num?)?.toInt(),
       actividades: j['actividades'] is List
           ? (j['actividades'] as List)
               .map((a) => ActividadPlan.fromJson(a))
               .toList()
           : [],
+      sesionNumero: (j['sesion_numero'] as num?)?.toInt() ?? 1,
+    );
+  }
+}
+
+class NotificacionData {
+  final String id;
+  final String titulo;
+  final String mensaje;
+  final bool leido;
+  final String createdAt;
+
+  NotificacionData({
+    required this.id,
+    required this.titulo,
+    required this.mensaje,
+    required this.leido,
+    required this.createdAt,
+  });
+
+  factory NotificacionData.fromJson(dynamic raw) {
+    final j = _toMap(raw);
+    return NotificacionData(
+      id: j['id']?.toString() ?? '',
+      titulo: j['titulo']?.toString() ?? '',
+      mensaje: j['mensaje']?.toString() ?? '',
+      leido: j['leido'] == true,
+      createdAt: j['created_at']?.toString() ?? '',
     );
   }
 }
@@ -373,6 +466,101 @@ class DashboardService {
       );
     } on DioException catch (e) {
       throw Exception(_extractDetail(e, 'Error al asociar la actividad.'));
+    }
+  }
+
+  Future<void> reemplazarActividadEnPlan({
+    required String planId,
+    required String actividadId,
+    required String nuevaActividadId,
+  }) async {
+    try {
+      await _dio.patch(
+        '/api/dashboard/terapeuta/planes/$planId/actividades/$actividadId/reemplazar/$nuevaActividadId',
+      );
+    } on DioException catch (e) {
+      throw Exception(_extractDetail(e, 'Error al reemplazar la actividad.'));
+    }
+  }
+
+  Future<void> desasociarActividadDePlan({
+    required String planId,
+    required String actividadId,
+  }) async {
+    try {
+      await _dio.delete(
+        '/api/dashboard/terapeuta/planes/$planId/actividades/$actividadId',
+      );
+    } on DioException catch (e) {
+      throw Exception(_extractDetail(e, 'Error al remover la actividad del plan.'));
+    }
+  }
+
+  Future<Map<String, dynamic>> actualizarDificultadActividad({
+    required String planId,
+    required String actividadId,
+    required String nivelDificultad,
+    String origen = 'manual',
+    String? observacion,
+    double? tasaAciertos,
+    int? muestras,
+  }) async {
+    try {
+      final response = await _dio.patch(
+        '/api/dashboard/terapeuta/planes/$planId/actividades/$actividadId/dificultad',
+        data: {
+          'nivel_dificultad': nivelDificultad,
+          'origen': origen,
+          if (observacion != null && observacion.trim().isNotEmpty)
+            'observacion': observacion.trim(),
+          if (tasaAciertos != null) 'tasa_aciertos': tasaAciertos,
+          if (muestras != null) 'muestras': muestras,
+        },
+      );
+      return (response.data as Map).cast<String, dynamic>();
+    } on DioException catch (e) {
+      throw Exception(_extractDetail(e, 'Error al actualizar dificultad.'));
+    }
+  }
+
+  Future<Map<String, dynamic>> validarNivelTea({
+    required String ninoId,
+    required int nivelTea,
+    String? observacion,
+  }) async {
+    try {
+      final response = await _dio.patch(
+        '/api/dashboard/terapeuta/ninos/$ninoId/validacion-tea',
+        data: {
+          'nivel_tea': nivelTea,
+          if (observacion != null && observacion.trim().isNotEmpty)
+            'observacion': observacion.trim(),
+        },
+      );
+      return (response.data as Map).cast<String, dynamic>();
+    } on DioException catch (e) {
+      throw Exception(_extractDetail(e, 'Error al validar nivel TEA.'));
+    }
+  }
+
+  Future<Map<String, dynamic>> actualizarEstadoPlan({
+    required String planId,
+    required String estado,
+    String? observacion,
+  }) async {
+    try {
+      final response = await _dio.patch(
+        '/api/dashboard/terapeuta/planes/$planId/estado',
+        data: {
+          'estado': estado,
+          if (observacion != null && observacion.trim().isNotEmpty)
+            'observacion': observacion.trim(),
+        },
+      );
+      return (response.data as Map).cast<String, dynamic>();
+    } on DioException catch (e) {
+      throw Exception(
+          _extractDetail(e, 'Error al actualizar el estado del plan.'));
     }
   }
 
@@ -482,10 +670,15 @@ class DashboardService {
     }
   }
 
-  Future<Map<String, dynamic>> vincularPorId(String ninoId) async {
+  Future<Map<String, dynamic>> vincularPorId(String ninoId,
+      {bool omitirPerfil = false}) async {
     try {
-      final response =
-          await _dio.post('/api/dashboard/terapeuta/vincular/$ninoId');
+      final response = await _dio.post(
+        '/api/dashboard/terapeuta/vincular/$ninoId',
+        queryParameters: {
+          if (omitirPerfil) 'omitir_perfil': 'true',
+        },
+      );
       return (response.data as Map).cast<String, dynamic>();
     } on DioException catch (e) {
       throw Exception(_extractDetail(e, 'Error al vincular el paciente.'));
@@ -529,6 +722,25 @@ class DashboardService {
       );
     } on DioException catch (e) {
       throw Exception(_extractDetail(e, 'Error al adjuntar el documento.'));
+    }
+  }
+
+  Future<List<NotificacionData>> obtenerNotificaciones() async {
+    try {
+      final response = await _dio.get('/api/dashboard/familia/notificaciones');
+      final list = response.data as List? ?? [];
+      return list.map((e) => NotificacionData.fromJson(e)).toList();
+    } on DioException catch (e) {
+      throw Exception(_extractDetail(e, 'Error al obtener notificaciones.'));
+    }
+  }
+
+  Future<void> marcarNotificacionLeida(String id) async {
+    try {
+      await _dio.patch('/api/dashboard/familia/notificaciones/$id/leer');
+    } on DioException catch (e) {
+      throw Exception(
+          _extractDetail(e, 'Error al marcar notificación como leída.'));
     }
   }
 }
@@ -595,4 +807,9 @@ final actividadesCatalogoProvider = FutureProvider.autoDispose
 final pendientesProvider =
     FutureProvider.autoDispose<List<NinoPendiente>>((ref) async {
   return ref.read(dashboardServiceProvider).obtenerPendientes();
+});
+
+final notificacionesProvider =
+    FutureProvider.autoDispose<List<NotificacionData>>((ref) async {
+  return ref.read(dashboardServiceProvider).obtenerNotificaciones();
 });

@@ -40,7 +40,6 @@ def _row(aciertos, repeticiones, nivel_actual="Medio"):
 def test_ajuste_dificultad_aumenta_con_desempeno_mayor_o_igual_a_80():
     cursor = FakeCursor([
         _row(8, 10, "Medio"),
-        _row(8, 10, "Medio"),
     ])
 
     ajuste = _evaluar_ajuste_dificultad(
@@ -55,18 +54,14 @@ def test_ajuste_dificultad_aumenta_con_desempeno_mayor_o_igual_a_80():
     assert ajuste["tasa_aciertos"] == 0.8
     assert ajuste["dificultad_actual"] == "Medio"
     assert ajuste["dificultad_sugerida"] == "Alto"
-    assert ajuste["registrado"] is True
-
-    update_params = cursor.write_executions[0][1]
-    insert_params = cursor.write_executions[1][1]
-    assert update_params[0] == "Alto"
-    assert insert_params[3] == "AUMENTAR_DIFICULTAD"
+    assert ajuste["registrado"] is False
+    assert ajuste["aplicable"] is True
+    assert cursor.write_executions == []
 
 
 def test_ajuste_dificultad_reduce_con_desempeno_menor_a_40():
     cursor = FakeCursor([
-        _row(1, 5, "Medio"),
-        _row(2, 5, "Medio"),
+        _row(3, 10, "Medio"),
     ])
 
     ajuste = _evaluar_ajuste_dificultad(
@@ -81,18 +76,13 @@ def test_ajuste_dificultad_reduce_con_desempeno_menor_a_40():
     assert ajuste["tasa_aciertos"] == 0.3
     assert ajuste["dificultad_actual"] == "Medio"
     assert ajuste["dificultad_sugerida"] == "Bajo"
-    assert ajuste["registrado"] is True
-
-    update_params = cursor.write_executions[0][1]
-    insert_params = cursor.write_executions[1][1]
-    assert update_params[0] == "Bajo"
-    assert insert_params[3] == "REDUCIR_DIFICULTAD"
+    assert ajuste["registrado"] is False
+    assert ajuste["aplicable"] is True
+    assert cursor.write_executions == []
 
 
-def test_ajuste_dificultad_no_registra_sin_resultados_previos_suficientes():
-    cursor = FakeCursor([
-        _row(10, 10, "Medio"),
-    ])
+def test_ajuste_dificultad_no_aplica_con_desempeno_intermedio():
+    cursor = FakeCursor([_row(6, 10, "Medio")])
 
     ajuste = _evaluar_ajuste_dificultad(
         cursor,
@@ -101,5 +91,7 @@ def test_ajuste_dificultad_no_registra_sin_resultados_previos_suficientes():
         actividad_id="actividad-1",
     )
 
-    assert ajuste is None
+    assert ajuste is not None
+    assert ajuste["accion"] == "mantener"
+    assert ajuste["aplicable"] is False
     assert cursor.write_executions == []

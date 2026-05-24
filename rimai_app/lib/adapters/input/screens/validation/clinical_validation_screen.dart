@@ -44,7 +44,7 @@ class _ClinicalValidationScreenState
       backgroundColor: const Color(0xFFFFF8F2),
       extendBodyBehindAppBar: true,
       appBar: RimAITopBar(
-        title: "Validación Clínica (IA-07)",
+        title: "Validacion clinica",
         leadingIcon: Icons.verified,
         iconColor: const Color(0xFF4A624D),
         trailingWidget: IconButton(
@@ -64,7 +64,7 @@ class _ClinicalValidationScreenState
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                "Toda recomendación generada por el motor adaptativo debe ser supervisada y justificada para aplicarse al plan del paciente. Tasa de revisión objetivo: >80%",
+                "Revisa cada sugerencia antes de aplicarla al plan del paciente.",
                 style: TextStyle(color: Color(0xFF58423B), height: 1.5),
               ),
               const SizedBox(height: 24),
@@ -151,6 +151,7 @@ class _RecomendacionItemCardState
     await ref
         .read(registrarDecisionProvider)
         .ejecutar(widget.recomendacion.id, accion, observacion);
+    if (!mounted) return;
     ref
         .read(recomendacionesProvider.notifier)
         .updateEstado(widget.recomendacion.id, accion, observacion);
@@ -246,7 +247,8 @@ class _RecomendacionItemCardState
                         padding: const EdgeInsets.symmetric(
                             horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
-                          color: _getStatusColor(r.estado).withOpacity(0.1),
+                          color:
+                              _getStatusColor(r.estado).withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(4),
                         ),
                         child: Text(r.estado,
@@ -279,7 +281,7 @@ class _RecomendacionItemCardState
                               color: Color(0xFF4A624D))),
                     ),
                     const SizedBox(height: 4),
-                    const Text("Confianza IA",
+                    const Text("Confianza",
                         style:
                             TextStyle(fontSize: 10, color: Color(0xFF8B716A))),
                   ],
@@ -287,7 +289,7 @@ class _RecomendacionItemCardState
               ],
             ),
             const SizedBox(height: 16),
-            const Text("JUSTIFICACIÓN DEL MOTOR (IA-03)",
+            const Text("JUSTIFICACION",
                 style: TextStyle(
                     fontSize: 10,
                     fontWeight: FontWeight.bold,

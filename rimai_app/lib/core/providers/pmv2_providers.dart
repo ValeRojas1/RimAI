@@ -23,8 +23,20 @@ class PacientePerfil {
   final List<String> intereses;
   final Map<String, List<String>> estimulosAversivos;
   final List<String> diagnosticos;
+  final List<String> rutinasRegulacion;
+  final Map<String, dynamic> documentosClinicos;
+  final String? medicacionActual;
   final String? planActivoId;
   final String estadoClinico;
+  final String? planEstado;
+  final int? nivelTeaValidado;
+  final bool perfilValidado;
+  final bool requiereScq;
+  final bool scqCompletado;
+  final bool scqAutorizadoEnvio;
+  final bool tieneEvidenciaClinica;
+  final int? scqPuntaje;
+  final String? scqNivel;
 
   PacientePerfil({
     required this.id,
@@ -37,8 +49,20 @@ class PacientePerfil {
     required this.intereses,
     required this.estimulosAversivos,
     required this.diagnosticos,
+    this.rutinasRegulacion = const [],
+    this.documentosClinicos = const {},
+    this.medicacionActual,
     this.planActivoId,
     this.estadoClinico = 'pendiente_asignacion',
+    this.planEstado,
+    this.nivelTeaValidado,
+    this.perfilValidado = false,
+    this.requiereScq = false,
+    this.scqCompletado = false,
+    this.scqAutorizadoEnvio = false,
+    this.tieneEvidenciaClinica = false,
+    this.scqPuntaje,
+    this.scqNivel,
   });
 
   factory PacientePerfil.fromJson(dynamic raw) {
@@ -54,6 +78,9 @@ class PacientePerfil {
     }
 
     final documento = j['documento_diagnostico']?.toString();
+    final docs = j['documentos_clinicos'] is Map
+        ? (j['documentos_clinicos'] as Map).cast<String, dynamic>()
+        : <String, dynamic>{};
     return PacientePerfil(
       id: j['id']?.toString() ?? '',
       nombre: j['nombre']?.toString() ?? '',
@@ -73,8 +100,25 @@ class PacientePerfil {
           : [],
       estimulosAversivos: aversivos,
       diagnosticos: documento == null || documento.isEmpty ? [] : [documento],
+      rutinasRegulacion: j['rutinas_regulacion'] is List
+          ? (j['rutinas_regulacion'] as List).map((e) => e.toString()).toList()
+          : [],
+      documentosClinicos: docs,
+      medicacionActual: j['medicacion_actual']?.toString(),
       planActivoId: j['plan_activo_id']?.toString(),
       estadoClinico: j['estado_clinico']?.toString() ?? 'pendiente_asignacion',
+      planEstado: j['plan_estado']?.toString(),
+      nivelTeaValidado: (j['nivel_tea_validado'] as num?)?.toInt(),
+      perfilValidado: j['perfil_validado'] == true,
+      requiereScq: j['requiere_scq'] == true,
+      scqCompletado: j['scq_completado'] == true,
+      scqAutorizadoEnvio: j['scq_autorizado_envio'] == true,
+      tieneEvidenciaClinica: j['tiene_evidencia_clinica'] == true ||
+          (docs.isNotEmpty ||
+              (j['diagnostico']?.toString().trim().isNotEmpty ?? false) ||
+              (j['medicacion_actual']?.toString().trim().isNotEmpty ?? false)),
+      scqPuntaje: (j['scq_puntaje'] as num?)?.toInt(),
+      scqNivel: j['scq_nivel']?.toString(),
     );
   }
 }
@@ -261,6 +305,126 @@ class RecomendacionClinica {
   }
 }
 
+class SolicitudAjusteData {
+  final String id;
+  final String accion;
+  final String dificultadActual;
+  final String dificultadSugerida;
+  final String estado;
+  final double? tasaAciertos;
+  final int? muestras;
+  final String? observacionTutor;
+
+  SolicitudAjusteData({
+    required this.id,
+    required this.accion,
+    required this.dificultadActual,
+    required this.dificultadSugerida,
+    required this.estado,
+    this.tasaAciertos,
+    this.muestras,
+    this.observacionTutor,
+  });
+
+  factory SolicitudAjusteData.fromJson(dynamic raw) {
+    final j = _toMap(raw);
+    return SolicitudAjusteData(
+      id: j['id']?.toString() ?? '',
+      accion: j['accion']?.toString() ?? 'mantener',
+      dificultadActual: j['dificultad_actual']?.toString() ?? 'Medio',
+      dificultadSugerida: j['dificultad_sugerida']?.toString() ?? 'Medio',
+      estado: j['estado']?.toString() ?? 'pendiente',
+      tasaAciertos: (j['tasa_aciertos'] as num?)?.toDouble(),
+      muestras: (j['muestras'] as num?)?.toInt(),
+      observacionTutor: j['observacion_tutor']?.toString(),
+    );
+  }
+}
+
+class ActividadRevisionSesion {
+  final String actividadId;
+  final String actividadNombre;
+  final String? instrucciones;
+  final int aciertos;
+  final int intentos;
+  final double tasaAciertos;
+  final String nivelDificultadUsado;
+  final int nivelAyudaRequerido;
+  final String? observaciones;
+  final SolicitudAjusteData? solicitudAjuste;
+
+  ActividadRevisionSesion({
+    required this.actividadId,
+    required this.actividadNombre,
+    this.instrucciones,
+    required this.aciertos,
+    required this.intentos,
+    required this.tasaAciertos,
+    required this.nivelDificultadUsado,
+    required this.nivelAyudaRequerido,
+    this.observaciones,
+    this.solicitudAjuste,
+  });
+
+  factory ActividadRevisionSesion.fromJson(dynamic raw) {
+    final j = _toMap(raw);
+    return ActividadRevisionSesion(
+      actividadId: j['actividad_id']?.toString() ?? '',
+      actividadNombre: j['actividad_nombre']?.toString() ?? '',
+      instrucciones: j['instrucciones']?.toString(),
+      aciertos: (j['aciertos'] as num?)?.toInt() ?? 0,
+      intentos: (j['intentos'] as num?)?.toInt() ?? 0,
+      tasaAciertos: (j['tasa_aciertos'] as num?)?.toDouble() ?? 0,
+      nivelDificultadUsado: j['nivel_dificultad_usado']?.toString() ?? 'Medio',
+      nivelAyudaRequerido: (j['nivel_ayuda_requerido'] as num?)?.toInt() ?? 0,
+      observaciones: j['observaciones']?.toString(),
+      solicitudAjuste: j['solicitud_ajuste'] == null
+          ? null
+          : SolicitudAjusteData.fromJson(j['solicitud_ajuste']),
+    );
+  }
+}
+
+class SesionRevisionData {
+  final String id;
+  final String planId;
+  final int sesionNumero;
+  final DateTime? fecha;
+  final double tasaAciertos;
+  final int totalAciertos;
+  final int totalIntentos;
+  final List<ActividadRevisionSesion> actividades;
+
+  SesionRevisionData({
+    required this.id,
+    required this.planId,
+    required this.sesionNumero,
+    this.fecha,
+    required this.tasaAciertos,
+    required this.totalAciertos,
+    required this.totalIntentos,
+    required this.actividades,
+  });
+
+  factory SesionRevisionData.fromJson(dynamic raw) {
+    final j = _toMap(raw);
+    return SesionRevisionData(
+      id: j['id']?.toString() ?? '',
+      planId: j['plan_id']?.toString() ?? '',
+      sesionNumero: (j['sesion_numero'] as num?)?.toInt() ?? 1,
+      fecha: DateTime.tryParse(j['fecha']?.toString() ?? ''),
+      tasaAciertos: (j['tasa_aciertos'] as num?)?.toDouble() ?? 0,
+      totalAciertos: (j['total_aciertos'] as num?)?.toInt() ?? 0,
+      totalIntentos: (j['total_intentos'] as num?)?.toInt() ?? 0,
+      actividades: j['actividades'] is List
+          ? (j['actividades'] as List)
+              .map((a) => ActividadRevisionSesion.fromJson(a))
+              .toList()
+          : [],
+    );
+  }
+}
+
 class PerfilService {
   PerfilService(this._dio);
   final Dio _dio;
@@ -270,7 +434,12 @@ class PerfilService {
     return PacientePerfil.fromJson(response.data);
   }
 
-  Future<void> actualizarPerfil(PacientePerfil perfil) async {}
+  Future<void> actualizarPerfilClinico(
+    String ninoId,
+    Map<String, dynamic> datos,
+  ) async {
+    await _dio.patch('/api/ninos/$ninoId/perfil-clinico', data: datos);
+  }
 
   Future<String> cargarDiagnostico(dynamic file) async {
     return file?.toString().split(RegExp(r'[\\/]')).last ?? 'diagnostico.pdf';
@@ -305,6 +474,31 @@ class IAService {
       'nino_id': ninoId,
     });
   }
+
+  Future<List<SesionRevisionData>> obtenerSesionesRevision(
+      String ninoId) async {
+    final response = await _dio.get('/api/ninos/$ninoId/sesiones-revision');
+    final data = _toMap(response.data);
+    final sesiones = data['sesiones'];
+    return sesiones is List
+        ? sesiones.map((s) => SesionRevisionData.fromJson(s)).toList()
+        : [];
+  }
+
+  Future<void> resolverSolicitudAjuste(
+    String solicitudId, {
+    required bool aceptar,
+    String? observacion,
+  }) async {
+    await _dio.post(
+      '/api/dashboard/terapeuta/solicitudes-ajuste/$solicitudId/resolver',
+      data: {
+        'aceptar': aceptar,
+        if (observacion != null && observacion.trim().isNotEmpty)
+          'observacion': observacion.trim(),
+      },
+    );
+  }
 }
 
 class SesionService {
@@ -322,31 +516,85 @@ class SesionService {
     required String nivelDificultadUsado,
     String? observaciones,
   }) async {
-    final response = await _dio.post('/api/sesiones', data: {
-      'nino_id': ninoId,
+    try {
+      final response = await _dio.post('/api/sesiones',
+          data: {
+            'nino_id': ninoId,
+            'plan_id': planId,
+            'resultados': [
+              {
+                'actividad_id': actividadId,
+                'aciertos': aciertos,
+                'repeticiones': intentos,
+                'tiempo_respuesta': segundos.toDouble(),
+                'nivel_ayuda_requerido': {
+                      'Ninguna': 0,
+                      'Verbal': 1,
+                      'Fisica': 2,
+                      'Física': 2
+                    }[nivelAyuda] ??
+                    0,
+                'nivel_dificultad_usado': nivelDificultadUsado,
+                'observaciones': observaciones,
+              }
+            ],
+          },
+          options: Options(
+            sendTimeout: const Duration(seconds: 30),
+            receiveTimeout: const Duration(seconds: 30),
+          ));
+      return (response.data as Map).cast<String, dynamic>();
+    } on DioException catch (e) {
+      final data = e.response?.data;
+      final detail = data is Map ? data['detail'] : null;
+      if (detail is Map) {
+        throw ActivitySaveException(
+          detail['codigo']?.toString() ?? 'error_guardado',
+          detail['mensaje']?.toString() ?? 'No se pudo guardar la actividad.',
+        );
+      }
+      throw const ActivitySaveException(
+        'error_guardado',
+        'No se pudo guardar la actividad.',
+      );
+    }
+  }
+
+  Future<void> solicitarAjusteDificultad({
+    required String sesionId,
+    required String planId,
+    required String actividadId,
+    required String accion,
+    required String dificultadActual,
+    required String dificultadSugerida,
+    double? tasaAciertos,
+    int? muestras,
+    String? observacion,
+  }) async {
+    await _dio.post('/api/sesiones/$sesionId/solicitud-ajuste', data: {
       'plan_id': planId,
-      'resultados': [
-        {
-          'actividad_id': actividadId,
-          'aciertos': aciertos,
-          'repeticiones': intentos,
-          'tiempo_respuesta': segundos.toDouble(),
-          'nivel_ayuda_requerido': {
-                'Ninguna': 0,
-                'Verbal': 1,
-                'Fisica': 2,
-                'Física': 2
-              }[nivelAyuda] ??
-              0,
-          'nivel_dificultad_usado': nivelDificultadUsado,
-          'observaciones': observaciones,
-        }
-      ],
+      'actividad_id': actividadId,
+      'accion': accion,
+      'dificultad_actual': dificultadActual,
+      'dificultad_sugerida': dificultadSugerida,
+      if (tasaAciertos != null) 'tasa_aciertos': tasaAciertos,
+      if (muestras != null) 'muestras': muestras,
+      if (observacion != null && observacion.trim().isNotEmpty)
+        'observacion': observacion.trim(),
     });
-    return (response.data as Map).cast<String, dynamic>();
   }
 
   Future<void> guardarObservacion(String sesionId, String texto) async {}
+}
+
+class ActivitySaveException implements Exception {
+  final String code;
+  final String message;
+
+  const ActivitySaveException(this.code, this.message);
+
+  @override
+  String toString() => message;
 }
 
 class IndicadoresProgresoService {
@@ -396,6 +644,11 @@ final planSesionProvider =
     FutureProvider.family<List<SessionStep>, String>((ref, ninoId) async {
   final data = await ref.read(iaServiceProvider).obtenerAsistente(ninoId);
   return data.planSesion;
+});
+
+final sesionesRevisionProvider =
+    FutureProvider.family<List<SesionRevisionData>, String>((ref, ninoId) {
+  return ref.read(iaServiceProvider).obtenerSesionesRevision(ninoId);
 });
 
 final nivelInicialProvider = FutureProvider.family<NivelInicialData,

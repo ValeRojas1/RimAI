@@ -28,6 +28,7 @@ from typing import Any, Dict, List, Optional
 import psycopg2
 from psycopg2.extras import Json, RealDictCursor
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from app.adapters.inbound.api.dependencies import get_current_user
@@ -46,7 +47,33 @@ def _conn():
     return psycopg2.connect(DATABASE_URL)
 
 
+def _crear_notificacion_tutor(cur, nino_id, titulo, mensaje):
+    cur.execute(
+        """
+        INSERT INTO notificaciones (usuario_id, titulo, mensaje)
+        SELECT pt.usuario_id, %s, %s
+        FROM ninos n
+        JOIN padres_tutores pt ON pt.id = n.tutor_id
+        WHERE n.id = %s
+        """,
+        (titulo, mensaje, nino_id),
+    )
+
+
 # ── Pydantic models ────────────────────────────────────────────────────────────
+
+@router.get("/api/files/evaluations/{filename}")
+def descargar_documento_clinico(
+    filename: str,
+    current_user: dict = Depends(get_current_user),
+):
+    safe_name = os.path.basename(filename)
+    storage = CloudStorageAdapter()
+    path = os.path.join(storage.upload_dir, safe_name)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="Documento no encontrado")
+    return FileResponse(path, filename=safe_name)
+
 
 class VincularPacienteRequest(BaseModel):
     email: Optional[str] = None
@@ -94,7 +121,46 @@ class CrearSesionRequest(BaseModel):
     resultados: List[ResultadoActividadRequest]
 
 
+class SolicitarAjusteDificultadRequest(BaseModel):
+    plan_id: str
+    actividad_id: str
+    accion: str
+    dificultad_actual: str
+    dificultad_sugerida: str
+    tasa_aciertos: Optional[float] = None
+    muestras: Optional[int] = None
+    observacion: Optional[str] = None
+
+
+class ResolverSolicitudAjusteRequest(BaseModel):
+    aceptar: bool
+    observacion: Optional[str] = None
+
+
+class ActualizarDificultadActividadRequest(BaseModel):
+    nivel_dificultad: str
+    origen: Optional[str] = "manual"
+    observacion: Optional[str] = None
+    tasa_aciertos: Optional[float] = None
+    muestras: Optional[int] = None
+
+
 # ── Helpers ────────────────────────────────────────────────────────────────────
+
+class ValidarNivelTeaRequest(BaseModel):
+    nivel_tea: int
+    observacion: Optional[str] = None
+
+
+class ActualizarEstadoPlanRequest(BaseModel):
+    estado: str
+    observacion: Optional[str] = None
+
+
+MAX_ACTIVIDADES_PLAN = 3
+MAX_DURACION_PLAN_SEGUNDOS = 3600
+MIN_TIEMPO_ACTIVIDAD_SEGUNDOS = 30
+
 
 def _calc_edad(fecha_nac) -> int:
     if fecha_nac is None:
@@ -113,6 +179,53 @@ def _has_clinical_evidence(req: RegistrarNinoRequest) -> bool:
     documentos = req.documentos_clinicos or {}
     has_docs = any(bool(v) for v in documentos.values())
     return bool((req.diagnostico or "").strip() or (req.medicacion_actual or "").strip() or has_docs)
+
+
+def _perfil_tiene_evidencia_clinica(
+    perfil: Optional[Dict[str, Any]],
+    diagnostico: Optional[str] = None,
+) -> bool:
+    perfil = perfil or {}
+    documentos = perfil.get("documentos_clinicos") or {}
+    medicacion = perfil.get("medicacion_actual")
+    return bool(
+        (diagnostico or "").strip()
+        or (str(medicacion).strip() if medicacion is not None else "")
+        or any(bool(v) for v in documentos.values())
+    )
+
+
+def _infer_nivel_tea(diagnostico: Optional[str], perfil: Optional[Dict[str, Any]]) -> int:
+    text = (diagnostico or "").lower()
+    triaje = _triaje_from_perfil(perfil)
+    scq = triaje.get("scq", {}) if isinstance(triaje.get("scq"), dict) else {}
+    nivel_scq = str(scq.get("nivel_indicio") or "").lower()
+    if "nivel 3" in text or "nivel iii" in text or "alto" in nivel_scq:
+        return 3
+    if "nivel 2" in text or "nivel ii" in text or "moderado" in nivel_scq:
+        return 2
+    return 1
+
+
+def _objetivos_desde_perfil(perfil: Optional[Dict[str, Any]]) -> List[str]:
+    perfil = perfil or {}
+    hitos = perfil.get("hitos") or {}
+    sensorial = perfil.get("sensorial") or {}
+    objetivos = []
+    comunicacion = hitos.get("comunicacion")
+    if comunicacion:
+        objetivos.append(f"Fortalecer comunicacion funcional ({comunicacion}).")
+    if perfil.get("rutinas_regulacion"):
+        objetivos.append("Usar rutinas de regulacion registradas por la familia.")
+    if sensorial.get("hipersensibilidad") or perfil.get("estimulosAversivos"):
+        objetivos.append("Adaptar actividades a sensibilidades y estimulos aversivos.")
+    if perfil.get("intereses"):
+        objetivos.append("Incorporar intereses del nino como motivadores terapeuticos.")
+    return objetivos or [
+        "Fortalecer comunicacion funcional.",
+        "Mejorar tolerancia a actividades guiadas.",
+        "Promover autonomia en rutinas diarias.",
+    ]
 
 
 def _triaje_from_perfil(perfil: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -189,6 +302,114 @@ def _normalize_dificultad(value: Optional[str]) -> str:
     return dificultad if dificultad in ("Bajo", "Medio", "Alto") else "Medio"
 
 
+def _normalize_estado_plan(value: Optional[str]) -> str:
+    estado = (value or "").strip().lower()
+    if estado not in ("borrador", "aprobado", "publicado"):
+        raise HTTPException(status_code=400, detail="Estado de plan no valido")
+    return estado
+
+
+def _normalize_nivel_tea(value: Any) -> int:
+    try:
+        nivel = int(value)
+    except (TypeError, ValueError):
+        text = str(value or "").lower()
+        if "1" in text:
+            nivel = 1
+        elif "2" in text:
+            nivel = 2
+        elif "3" in text:
+            nivel = 3
+        else:
+            nivel = 0
+    if nivel not in (1, 2, 3):
+        raise HTTPException(status_code=400, detail="El nivel TEA debe ser 1, 2 o 3")
+    return nivel
+
+
+def _modo_ejecucion_por_tea(nivel_tea: Optional[int]) -> Dict[str, Any]:
+    nivel = int(nivel_tea or 0)
+    requiere = nivel != 1
+    return {
+        "modo_ejecucion": "acompanada" if requiere else "autonoma",
+        "requiere_acompanamiento": requiere,
+    }
+
+
+def _validar_plan_publicable(cur, plan_id: str, terapeuta_id: str) -> Dict[str, Any]:
+    cur.execute(
+        """
+        SELECT
+            pt.id,
+            pt.nino_id,
+            pt.estado_plan,
+            pt.limite_actividades,
+            pt.limite_duracion_segundos,
+            n.nivel_tea_validado,
+            n.perfil_validado_at
+        FROM planes_terapeuticos pt
+        JOIN ninos n ON n.id = pt.nino_id
+        WHERE pt.id = %s
+          AND pt.terapeuta_id = %s
+          AND pt.activo = TRUE
+        """,
+        (plan_id, terapeuta_id),
+    )
+    plan = cur.fetchone()
+    if not plan:
+        raise HTTPException(status_code=404, detail="Plan activo no encontrado para este terapeuta")
+
+    cur.execute(
+        """
+        SELECT
+            COUNT(*) AS actividades,
+            COALESCE(SUM(COALESCE(a.duracion_estimada, 0)), 0) AS duracion_total,
+            COUNT(*) FILTER (WHERE COALESCE(a.duracion_estimada, 0) <= 0) AS sin_duracion
+        FROM plan_actividades pa
+        JOIN actividades a ON a.id = pa.actividad_id
+        WHERE pa.plan_id = %s
+        """,
+        (plan_id,),
+    )
+    resumen = cur.fetchone()
+    errores = []
+    actividades = int(resumen["actividades"] or 0)
+    duracion_total = int(resumen["duracion_total"] or 0)
+    sin_duracion = int(resumen["sin_duracion"] or 0)
+
+    if not plan["nivel_tea_validado"]:
+        errores.append("El terapeuta debe validar el nivel TEA antes de aprobar o publicar el plan.")
+    if not plan["perfil_validado_at"]:
+        errores.append("El perfil clinico debe estar validado por el terapeuta.")
+    if actividades == 0:
+        errores.append("El plan debe tener al menos una actividad.")
+    if actividades > MAX_ACTIVIDADES_PLAN:
+        errores.append("El plan no puede tener mas de 3 actividades.")
+    if sin_duracion > 0:
+        errores.append("Todas las actividades deben tener duracion definida.")
+    if duracion_total > MAX_DURACION_PLAN_SEGUNDOS:
+        errores.append("La duracion total del plan no puede superar 60 minutos.")
+
+    if errores:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "mensaje": "El plan no cumple las reglas de negocio para publicarse.",
+                "errores": errores,
+                "actividades": actividades,
+                "duracion_total_segundos": duracion_total,
+            },
+        )
+
+    return {
+        "plan_id": str(plan["id"]),
+        "nino_id": str(plan["nino_id"]),
+        "nivel_tea_validado": plan["nivel_tea_validado"],
+        "actividades": actividades,
+        "duracion_total_segundos": duracion_total,
+    }
+
+
 def _ajustar_nivel(actual: str, direccion: str) -> Optional[str]:
     niveles = ["Bajo", "Medio", "Alto"]
     actual = _normalize_dificultad(actual)
@@ -214,11 +435,14 @@ def _evaluar_ajuste_dificultad(
             ra.nivel_dificultad_usado,
             a.nombre AS actividad_nombre,
             pt.terapeuta_id,
-            pt.nivel_dificultad_actual
+            COALESCE(pa.nivel_dificultad_actual, a.nivel_dificultad, pt.nivel_dificultad_actual) AS nivel_dificultad_actual
         FROM resultados_actividad ra
         JOIN sesiones s ON s.id = ra.sesion_id
         JOIN actividades a ON a.id = ra.actividad_id
         JOIN planes_terapeuticos pt ON pt.id = s.plan_id
+        LEFT JOIN plan_actividades pa
+          ON pa.plan_id = s.plan_id
+         AND pa.actividad_id = ra.actividad_id
         WHERE s.nino_id = %s
           AND s.plan_id = %s
           AND ra.actividad_id = %s
@@ -229,12 +453,26 @@ def _evaluar_ajuste_dificultad(
         (nino_id, plan_id, actividad_id),
     )
     rows = cur.fetchall()
-    if len(rows) < 2:
-        return None
+    if len(rows) < 1:
+        return {
+            "actividad_id": actividad_id,
+            "accion": "mantener",
+            "registrado": False,
+            "aplicable": False,
+            "muestras": len(rows),
+            "razon": "Se necesita al menos un resultado de esta actividad para ajustar.",
+        }
 
     total_intentos = sum(r["repeticiones"] or 0 for r in rows)
     if total_intentos <= 0:
-        return None
+        return {
+            "actividad_id": actividad_id,
+            "accion": "mantener",
+            "registrado": False,
+            "aplicable": False,
+            "muestras": len(rows),
+            "razon": "No hay intentos suficientes para calcular desempeno.",
+        }
 
     total_aciertos = sum(r["aciertos"] or 0 for r in rows)
     tasa = round(total_aciertos / total_intentos, 4)
@@ -247,13 +485,39 @@ def _evaluar_ajuste_dificultad(
         direccion = "reducir"
         accion = "REDUCIR_DIFICULTAD"
 
-    if not direccion or not accion:
-        return None
-
     actual = _normalize_dificultad(rows[0]["nivel_dificultad_actual"])
+    if not direccion or not accion:
+        return {
+            "actividad_id": actividad_id,
+            "actividad_nombre": rows[0]["actividad_nombre"],
+            "accion": "mantener",
+            "tasa_aciertos": tasa,
+            "muestras": len(rows),
+            "umbral_superior": 0.8,
+            "umbral_inferior": 0.4,
+            "dificultad_actual": actual,
+            "dificultad_sugerida": actual,
+            "registrado": False,
+            "aplicable": False,
+            "razon": "El desempeno no supera 80% ni cae por debajo de 40%.",
+        }
+
     sugerida = _ajustar_nivel(actual, direccion)
     if not sugerida:
-        return None
+        return {
+            "actividad_id": actividad_id,
+            "actividad_nombre": rows[0]["actividad_nombre"],
+            "accion": "mantener",
+            "tasa_aciertos": tasa,
+            "muestras": len(rows),
+            "umbral_superior": 0.8,
+            "umbral_inferior": 0.4,
+            "dificultad_actual": actual,
+            "dificultad_sugerida": actual,
+            "registrado": False,
+            "aplicable": False,
+            "razon": "La actividad ya esta en el limite de dificultad.",
+        }
 
     payload = {
         "actividad_id": actividad_id,
@@ -265,41 +529,12 @@ def _evaluar_ajuste_dificultad(
         "dificultad_actual": actual,
         "dificultad_sugerida": sugerida,
     }
-    cur.execute(
-        """
-        UPDATE planes_terapeuticos
-        SET nivel_dificultad_actual = %s,
-            criterios_progresion = COALESCE(criterios_progresion, '{}'::jsonb) || %s::jsonb
-        WHERE id = %s
-        """,
-        (
-            sugerida,
-            Json({"ultimo_ajuste": payload}),
-            plan_id,
-        ),
-    )
-    cur.execute(
-        """
-        INSERT INTO decisiones_clinicas
-            (terapeuta_id, nino_id, recomendacion_id, accion, observacion)
-        VALUES (%s, %s, %s, %s, %s)
-        RETURNING id, created_at
-        """,
-        (
-            rows[0]["terapeuta_id"],
-            nino_id,
-            f"ajuste_dificultad:{plan_id}:{actividad_id}",
-            accion,
-            json.dumps(payload, ensure_ascii=False),
-        ),
-    )
-    decision = cur.fetchone()
     return {
         **payload,
         "accion": direccion,
-        "registrado": True,
-        "decision_id": str(decision["id"]),
-        "created_at": decision["created_at"].isoformat(),
+        "registrado": False,
+        "aplicable": True,
+        "razon": "Sugerencia pendiente de aprobacion del terapeuta.",
     }
 
 
@@ -550,6 +785,10 @@ def pacientes_pendientes(current_user: dict = Depends(get_current_user)):
                 "scq_nivel": scq.get("nivel_indicio"),
                 "documentos_clinicos": sensorial.get("documentos_clinicos", {}),
                 "medicacion_actual": sensorial.get("medicacion_actual"),
+                "hitos": hitos,
+                "estimulos_aversivos": sensorial.get("estimulosAversivos", {}),
+                "rutinas_regulacion": sensorial.get("rutinas_regulacion", []),
+                "sensorial_familia": sensorial.get("sensorial", {}),
             }
         )
     return result
@@ -578,13 +817,13 @@ def vincular_paciente_por_email(
 
             if req.nino_id:
                 cur.execute(
-                    "SELECT id FROM ninos WHERE id = %s AND activo = TRUE",
+                    "SELECT id, diagnostico, perfil_sensorial FROM ninos WHERE id = %s AND activo = TRUE",
                     (req.nino_id,),
                 )
             elif req.email:
                 cur.execute(
                     """
-                    SELECT n.id FROM ninos n
+                    SELECT n.id, n.diagnostico, n.perfil_sensorial FROM ninos n
                     JOIN padres_tutores pt ON pt.id = n.tutor_id
                     JOIN usuarios u ON u.id = pt.usuario_id
                     WHERE lower(u.email) = lower(%s) AND n.activo = TRUE
@@ -599,17 +838,42 @@ def vincular_paciente_por_email(
             if not nino:
                 raise HTTPException(status_code=404, detail="Niño no encontrado")
 
+            perfil = nino.get("perfil_sensorial") or {}
+            triaje = _triaje_from_perfil(perfil)
+            requiere_scq = bool(triaje.get("requiere_scq", False))
+            tiene_evidencia = _perfil_tiene_evidencia_clinica(
+                perfil,
+                nino.get("diagnostico"),
+            )
+            nuevo_estado = (
+                "perfil_clinico_incompleto"
+                if requiere_scq and not tiene_evidencia
+                else "vinculado_terapeuta"
+            )
+
             cur.execute(
                 """
                 UPDATE ninos
                 SET terapeuta_id = %s,
-                    estado_clinico = 'perfil_clinico_incompleto',
+                    estado_clinico = %s,
                     vinculado_por = %s,
                     vinculado_at = NOW()
                 WHERE id = %s
                 """,
-                (ter["id"], ter["id"], nino["id"]),
+                (ter["id"], nuevo_estado, ter["id"], nino["id"]),
             )
+
+            # Notificar al tutor sobre la vinculación
+            cur.execute("SELECT nombre FROM usuarios WHERE id = %s", (current_user["id"],))
+            user_row = cur.fetchone()
+            terapeuta_nombre = user_row["nombre"] if user_row else "Un terapeuta"
+
+            cur.execute("SELECT nombre FROM ninos WHERE id = %s", (nino["id"],))
+            nino_row = cur.fetchone()
+            nino_nombre = nino_row["nombre"] if nino_row else "tu hijo/a"
+
+            mensaje = f"Tu hijo/a {nino_nombre} ha sido vinculado/a al terapeuta {terapeuta_nombre}."
+            _crear_notificacion_tutor(cur, nino["id"], "Terapeuta Vinculado", mensaje)
 
     return {"ok": True, "nino_id": str(nino["id"])}
 
@@ -619,6 +883,7 @@ def vincular_paciente_por_email(
 @router.post("/api/dashboard/terapeuta/vincular/{nino_id}")
 def vincular_paciente_por_id(
     nino_id: str,
+    omitir_perfil: bool = False,
     current_user: dict = Depends(get_current_user),
 ):
     if current_user["role"] != "terapeuta":
@@ -635,24 +900,75 @@ def vincular_paciente_por_id(
                 raise HTTPException(status_code=404, detail="Perfil de terapeuta no encontrado")
 
             cur.execute(
-                "SELECT id FROM ninos WHERE id = %s AND activo = TRUE",
+                "SELECT id, diagnostico, perfil_sensorial FROM ninos WHERE id = %s AND activo = TRUE",
                 (nino_id,),
             )
             nino = cur.fetchone()
             if not nino:
                 raise HTTPException(status_code=404, detail="Niño no encontrado")
 
-            cur.execute(
-                """
-                UPDATE ninos
-                SET terapeuta_id = %s,
-                    estado_clinico = 'perfil_clinico_incompleto',
-                    vinculado_por = %s,
-                    vinculado_at = NOW()
-                WHERE id = %s
-                """,
-                (ter["id"], ter["id"], nino["id"]),
+            perfil = nino.get("perfil_sensorial") or {}
+            triaje = _triaje_from_perfil(perfil)
+            requiere_scq = bool(triaje.get("requiere_scq", False))
+            tiene_evidencia = _perfil_tiene_evidencia_clinica(
+                perfil,
+                nino.get("diagnostico"),
             )
+            
+            perfil_obligatorio = requiere_scq and not tiene_evidencia
+            
+            if omitir_perfil and perfil_obligatorio:
+                raise HTTPException(
+                    status_code=400,
+                    detail="El perfil clínico es obligatorio para casos SCQ sin evidencia previa"
+                )
+
+            if omitir_perfil:
+                nivel_tea = _infer_nivel_tea(nino.get("diagnostico"), perfil)
+                objetivos = _objetivos_desde_perfil(perfil)
+                cur.execute(
+                    """
+                    UPDATE ninos
+                    SET terapeuta_id = %s,
+                        estado_clinico = 'listo_para_plan',
+                        vinculado_por = %s,
+                        vinculado_at = NOW(),
+                        perfil_completado_at = NOW(),
+                        nivel_tea_validado = %s,
+                        objetivos_intervencion = %s
+                    WHERE id = %s
+                    """,
+                    (ter["id"], ter["id"], nivel_tea, objetivos, nino["id"]),
+                )
+            else:
+                nuevo_estado = (
+                    "perfil_clinico_incompleto"
+                    if perfil_obligatorio
+                    else "vinculado_terapeuta"
+                )
+                cur.execute(
+                    """
+                    UPDATE ninos
+                    SET terapeuta_id = %s,
+                        estado_clinico = %s,
+                        vinculado_por = %s,
+                        vinculado_at = NOW()
+                    WHERE id = %s
+                    """,
+                    (ter["id"], nuevo_estado, ter["id"], nino["id"]),
+                )
+
+            # Notificar al tutor sobre la vinculación
+            cur.execute("SELECT nombre FROM usuarios WHERE id = %s", (current_user["id"],))
+            user_row = cur.fetchone()
+            terapeuta_nombre = user_row["nombre"] if user_row else "Un terapeuta"
+
+            cur.execute("SELECT nombre FROM ninos WHERE id = %s", (nino_id,))
+            nino_row = cur.fetchone()
+            nino_nombre = nino_row["nombre"] if nino_row else "tu hijo/a"
+
+            mensaje = f"Tu hijo/a {nino_nombre} ha sido vinculado/a al terapeuta {terapeuta_nombre}."
+            _crear_notificacion_tutor(cur, nino_id, "Terapeuta Vinculado", mensaje)
 
     return {"ok": True, "nino_id": nino_id}
 
@@ -681,10 +997,14 @@ def resumen_familia(current_user: dict = Depends(get_current_user)):
                     n.nivel_cognitivo, n.estado_clinico, n.diagnostico,
                     n.perfil_sensorial,
                     pt.id AS plan_activo_id,
-                    pt.nombre AS plan_activo
+                    pt.nombre AS plan_activo,
+                    pt.estado_plan AS plan_estado
                 FROM ninos n
                 LEFT JOIN planes_terapeuticos pt
-                    ON pt.nino_id = n.id AND pt.activo = TRUE
+                    ON pt.nino_id = n.id
+                   AND pt.activo = TRUE
+                   AND pt.estado_plan = 'publicado'
+                   AND pt.publicado_para_tutor = TRUE
                 WHERE n.tutor_id = %s AND n.activo = TRUE
                 """,
                 (tutor["id"],),
@@ -708,6 +1028,7 @@ def resumen_familia(current_user: dict = Depends(get_current_user)):
             "estado_clinico": n["estado_clinico"] or "pendiente_asignacion",
             "plan_activo": n["plan_activo"],
             "plan_activo_id": str(n["plan_activo_id"]) if n["plan_activo_id"] else None,
+            "plan_estado": n["plan_estado"],
             "ultima_sesion": None,
             "hitos": perfil.get("hitos", {}),
             "sensorial": perfil.get("sensorial", {}),
@@ -731,6 +1052,65 @@ def resumen_familia(current_user: dict = Depends(get_current_user)):
         "alertas_baja_adherencia": 0,
         "pacientes": pacientes_list,
     }
+
+
+# ── GET /api/dashboard/familia/notificaciones ──────────────────────────────────
+@router.get("/api/dashboard/familia/notificaciones")
+def obtener_notificaciones(current_user: dict = Depends(get_current_user)):
+    if current_user["role"] not in ("padre_tutor", "tutor"):
+        raise HTTPException(status_code=403, detail="Solo los tutores pueden acceder a las notificaciones")
+    
+    with _conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT id, titulo, mensaje, leido, created_at
+                FROM notificaciones
+                WHERE usuario_id = %s
+                ORDER BY created_at DESC
+                LIMIT 50
+                """,
+                (current_user["id"],),
+            )
+            rows = cur.fetchall()
+            
+    return [
+        {
+            "id": str(r["id"]),
+            "titulo": r["titulo"],
+            "mensaje": r["mensaje"],
+            "leido": r["leido"],
+            "created_at": r["created_at"].isoformat() if r["created_at"] else None
+        }
+        for r in rows
+    ]
+
+
+# ── PATCH /api/dashboard/familia/notificaciones/{notificacion_id}/leer ────────────
+@router.patch("/api/dashboard/familia/notificaciones/{notificacion_id}/leer")
+def marcar_notificacion_leida(
+    notificacion_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    if current_user["role"] not in ("padre_tutor", "tutor"):
+        raise HTTPException(status_code=403, detail="Solo los tutores pueden leer notificaciones")
+        
+    with _conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                UPDATE notificaciones
+                SET leido = TRUE
+                WHERE id = %s AND usuario_id = %s
+                RETURNING id
+                """,
+                (notificacion_id, current_user["id"]),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Notificación no encontrada o no pertenece al usuario")
+                
+    return {"ok": True, "notificacion_id": notificacion_id}
 
 
 # ── POST /api/dashboard/familia/paciente ──────────────────────────────────────
@@ -958,14 +1338,36 @@ def listar_actividades_ocupacionales(
 
     with _conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            if plan_id:
+            terapeuta_id = None
+            if current_user["role"] == "terapeuta":
                 cur.execute(
-                    """
-                    SELECT id FROM planes_terapeuticos
-                    WHERE id = %s AND activo = TRUE
-                    """,
-                    (plan_id,),
+                    "SELECT id FROM terapeutas WHERE usuario_id = %s",
+                    (current_user["id"],),
                 )
+                ter = cur.fetchone()
+                if not ter:
+                    raise HTTPException(status_code=404, detail="Perfil de terapeuta no encontrado")
+                terapeuta_id = ter["id"]
+
+            if plan_id:
+                if current_user["role"] == "terapeuta":
+                    cur.execute(
+                        """
+                        SELECT id FROM planes_terapeuticos
+                        WHERE id = %s
+                          AND terapeuta_id = %s
+                          AND activo = TRUE
+                        """,
+                        (plan_id, terapeuta_id),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        SELECT id FROM planes_terapeuticos
+                        WHERE id = %s AND activo = TRUE
+                        """,
+                        (plan_id,),
+                    )
                 if not cur.fetchone():
                     raise HTTPException(status_code=404, detail="Plan activo no encontrado")
 
@@ -973,7 +1375,9 @@ def listar_actividades_ocupacionales(
                 """
                 SELECT
                     a.id, a.tipo, a.nombre, a.instrucciones,
-                    a.nivel_dificultad, a.duracion_estimada,
+                    COALESCE(pa.nivel_dificultad_actual, a.nivel_dificultad) AS nivel_dificultad,
+                    a.nivel_dificultad AS nivel_catalogo,
+                    a.duracion_estimada,
                     a.recursos_multimedia,
                     CASE WHEN pa.actividad_id IS NULL THEN FALSE ELSE TRUE END AS asociado
                 FROM actividades a
@@ -995,6 +1399,7 @@ def listar_actividades_ocupacionales(
             "nombre": r["nombre"],
             "instrucciones": r["instrucciones"],
             "nivel_dificultad": r["nivel_dificultad"],
+            "nivel_catalogo": r["nivel_catalogo"],
             "duracion_estimada": r["duracion_estimada"],
             "materiales": (r["recursos_multimedia"] or {}).get("materiales", []),
             "asociado": r["asociado"],
@@ -1029,18 +1434,39 @@ def crear_actividad_ocupacional(
             if not ter:
                 raise HTTPException(status_code=404, detail="Perfil de terapeuta no encontrado")
 
+            plan_context = None
             if req.plan_id:
                 cur.execute(
                     """
-                    SELECT id FROM planes_terapeuticos
-                    WHERE id = %s
-                      AND terapeuta_id = %s
-                      AND activo = TRUE
+                    SELECT pt.id, n.nivel_tea_validado
+                    FROM planes_terapeuticos pt
+                    JOIN ninos n ON n.id = pt.nino_id
+                    WHERE pt.id = %s
+                      AND pt.terapeuta_id = %s
+                      AND pt.activo = TRUE
                     """,
                     (req.plan_id, ter["id"]),
                 )
-                if not cur.fetchone():
+                plan_context = cur.fetchone()
+                if not plan_context:
                     raise HTTPException(status_code=404, detail="Plan activo no encontrado para este terapeuta")
+                cur.execute(
+                    """
+                    SELECT
+                        COUNT(*) AS actividades,
+                        COALESCE(SUM(COALESCE(a.duracion_estimada, 0)), 0) AS duracion_total
+                    FROM plan_actividades pa
+                    JOIN actividades a ON a.id = pa.actividad_id
+                    WHERE pa.plan_id = %s
+                    """,
+                    (req.plan_id,),
+                )
+                resumen_plan = cur.fetchone()
+                if int(resumen_plan["actividades"] or 0) >= MAX_ACTIVIDADES_PLAN:
+                    raise HTTPException(status_code=422, detail="El plan no puede tener mas de 3 actividades")
+                duracion_total = int(resumen_plan["duracion_total"] or 0)
+                if duracion_total + req.duracion_estimada > MAX_DURACION_PLAN_SEGUNDOS:
+                    raise HTTPException(status_code=422, detail="La duracion total del plan no puede superar 60 minutos")
 
             cur.execute(
                 """
@@ -1064,6 +1490,7 @@ def crear_actividad_ocupacional(
 
             asociado = False
             if req.plan_id:
+                ejecucion = _modo_ejecucion_por_tea(plan_context["nivel_tea_validado"])
                 cur.execute(
                     "SELECT COALESCE(MAX(orden), 0) + 1 AS orden FROM plan_actividades WHERE plan_id = %s",
                     (req.plan_id,),
@@ -1071,11 +1498,26 @@ def crear_actividad_ocupacional(
                 orden = cur.fetchone()["orden"]
                 cur.execute(
                     """
-                    INSERT INTO plan_actividades (plan_id, actividad_id, orden)
-                    VALUES (%s, %s, %s)
-                    ON CONFLICT (plan_id, actividad_id) DO UPDATE SET orden = EXCLUDED.orden
+                    INSERT INTO plan_actividades (
+                        plan_id, actividad_id, orden, nivel_dificultad_actual,
+                        modo_ejecucion, requiere_acompanamiento
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (plan_id, actividad_id)
+                    DO UPDATE SET
+                        orden = EXCLUDED.orden,
+                        nivel_dificultad_actual = EXCLUDED.nivel_dificultad_actual,
+                        modo_ejecucion = EXCLUDED.modo_ejecucion,
+                        requiere_acompanamiento = EXCLUDED.requiere_acompanamiento
                     """,
-                    (req.plan_id, actividad["id"], orden),
+                    (
+                        req.plan_id,
+                        actividad["id"],
+                        orden,
+                        dificultad,
+                        ejecucion["modo_ejecucion"],
+                        ejecucion["requiere_acompanamiento"],
+                    ),
                 )
                 asociado = True
 
@@ -1113,21 +1555,46 @@ def asociar_actividad_a_plan(
 
             cur.execute(
                 """
-                SELECT id FROM planes_terapeuticos
-                WHERE id = %s AND terapeuta_id = %s AND activo = TRUE
+                SELECT pt.id, n.nivel_tea_validado
+                FROM planes_terapeuticos pt
+                JOIN ninos n ON n.id = pt.nino_id
+                WHERE pt.id = %s AND pt.terapeuta_id = %s AND pt.activo = TRUE
                 """,
                 (plan_id, ter["id"]),
             )
-            if not cur.fetchone():
+            plan_context = cur.fetchone()
+            if not plan_context:
                 raise HTTPException(status_code=404, detail="Plan activo no encontrado para este terapeuta")
 
             cur.execute(
-                "SELECT id FROM actividades WHERE id = %s AND activo = TRUE",
+                "SELECT id, nivel_dificultad, duracion_estimada FROM actividades WHERE id = %s AND activo = TRUE",
                 (actividad_id,),
             )
-            if not cur.fetchone():
+            actividad = cur.fetchone()
+            if not actividad:
                 raise HTTPException(status_code=404, detail="Actividad no encontrada")
 
+            cur.execute(
+                """
+                SELECT
+                    COUNT(*) AS actividades,
+                    COALESCE(SUM(COALESCE(a.duracion_estimada, 0)), 0) AS duracion_total,
+                    BOOL_OR(pa.actividad_id = %s) AS ya_asociada
+                FROM plan_actividades pa
+                JOIN actividades a ON a.id = pa.actividad_id
+                WHERE pa.plan_id = %s
+                """,
+                (actividad_id, plan_id),
+            )
+            resumen_plan = cur.fetchone()
+            ya_asociada = bool(resumen_plan["ya_asociada"])
+            if not ya_asociada and int(resumen_plan["actividades"] or 0) >= MAX_ACTIVIDADES_PLAN:
+                raise HTTPException(status_code=422, detail="El plan no puede tener mas de 3 actividades")
+            duracion_total = int(resumen_plan["duracion_total"] or 0)
+            if not ya_asociada and duracion_total + int(actividad["duracion_estimada"] or 0) > MAX_DURACION_PLAN_SEGUNDOS:
+                raise HTTPException(status_code=422, detail="La duracion total del plan no puede superar 60 minutos")
+
+            ejecucion = _modo_ejecucion_por_tea(plan_context["nivel_tea_validado"])
             cur.execute(
                 "SELECT COALESCE(MAX(orden), 0) + 1 AS orden FROM plan_actividades WHERE plan_id = %s",
                 (plan_id,),
@@ -1135,17 +1602,479 @@ def asociar_actividad_a_plan(
             orden = cur.fetchone()["orden"]
             cur.execute(
                 """
-                INSERT INTO plan_actividades (plan_id, actividad_id, orden)
-                VALUES (%s, %s, %s)
+                INSERT INTO plan_actividades (
+                    plan_id, actividad_id, orden, nivel_dificultad_actual,
+                    modo_ejecucion, requiere_acompanamiento
+                )
+                VALUES (%s, %s, %s, %s, %s, %s)
                 ON CONFLICT (plan_id, actividad_id) DO NOTHING
                 """,
-                (plan_id, actividad_id, orden),
+                (
+                    plan_id,
+                    actividad_id,
+                    orden,
+                    actividad["nivel_dificultad"],
+                    ejecucion["modo_ejecucion"],
+                    ejecucion["requiere_acompanamiento"],
+                ),
             )
 
     return {"ok": True, "plan_id": plan_id, "actividad_id": actividad_id}
 
 
+@router.delete("/api/dashboard/terapeuta/planes/{plan_id}/actividades/{actividad_id}")
+def desasociar_actividad_de_plan(
+    plan_id: str,
+    actividad_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    if current_user["role"] != "terapeuta":
+        raise HTTPException(status_code=403, detail="Solo terapeutas pueden desasociar actividades")
+
+    with _conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT id FROM terapeutas WHERE usuario_id = %s", (current_user["id"],))
+            ter = cur.fetchone()
+            if not ter:
+                raise HTTPException(status_code=404, detail="Perfil de terapeuta no encontrado")
+
+            cur.execute(
+                """
+                SELECT pt.id FROM planes_terapeuticos pt
+                WHERE pt.id = %s AND pt.terapeuta_id = %s AND pt.activo = TRUE
+                """,
+                (plan_id, ter["id"]),
+            )
+            plan_context = cur.fetchone()
+            if not plan_context:
+                raise HTTPException(status_code=404, detail="Plan activo no encontrado para este terapeuta")
+
+            cur.execute(
+                "DELETE FROM plan_actividades WHERE plan_id = %s AND actividad_id = %s RETURNING actividad_id",
+                (plan_id, actividad_id),
+            )
+            deleted = cur.fetchone()
+            if not deleted:
+                raise HTTPException(status_code=404, detail="Actividad no asociada a este plan")
+
+    return {"ok": True, "plan_id": plan_id, "actividad_id": actividad_id}
+
+
 # ── GET /api/ninos/{nino_id}/plan ─────────────────────────────────────────────
+
+@router.patch("/api/dashboard/terapeuta/planes/{plan_id}/actividades/{actividad_id}/reemplazar/{nueva_actividad_id}")
+def reemplazar_actividad_en_plan(
+    plan_id: str,
+    actividad_id: str,
+    nueva_actividad_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    if current_user["role"] != "terapeuta":
+        raise HTTPException(status_code=403, detail="Solo terapeutas pueden reemplazar actividades")
+
+    with _conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT id FROM terapeutas WHERE usuario_id = %s", (current_user["id"],))
+            ter = cur.fetchone()
+            if not ter:
+                raise HTTPException(status_code=404, detail="Perfil de terapeuta no encontrado")
+
+            cur.execute(
+                """
+                SELECT pt.id, n.nivel_tea_validado, pa.orden
+                FROM planes_terapeuticos pt
+                JOIN ninos n ON n.id = pt.nino_id
+                JOIN plan_actividades pa ON pa.plan_id = pt.id
+                WHERE pt.id = %s
+                  AND pt.terapeuta_id = %s
+                  AND pt.activo = TRUE
+                  AND pa.actividad_id = %s
+                """,
+                (plan_id, ter["id"], actividad_id),
+            )
+            plan_context = cur.fetchone()
+            if not plan_context:
+                raise HTTPException(status_code=404, detail="Actividad original no encontrada en el plan")
+
+            cur.execute(
+                "SELECT id, nivel_dificultad, duracion_estimada FROM actividades WHERE id = %s AND activo = TRUE",
+                (nueva_actividad_id,),
+            )
+            nueva = cur.fetchone()
+            if not nueva:
+                raise HTTPException(status_code=404, detail="Nueva actividad no encontrada")
+
+            if nueva_actividad_id != actividad_id:
+                cur.execute(
+                    "SELECT 1 FROM plan_actividades WHERE plan_id = %s AND actividad_id = %s",
+                    (plan_id, nueva_actividad_id),
+                )
+                if cur.fetchone():
+                    raise HTTPException(status_code=409, detail="La actividad seleccionada ya esta en el plan")
+
+            cur.execute(
+                """
+                SELECT
+                    COALESCE(SUM(COALESCE(a.duracion_estimada, 0)), 0)
+                    - COALESCE(MAX(CASE WHEN pa.actividad_id = %s THEN a.duracion_estimada ELSE 0 END), 0)
+                    AS duracion_sin_actual
+                FROM plan_actividades pa
+                JOIN actividades a ON a.id = pa.actividad_id
+                WHERE pa.plan_id = %s
+                """,
+                (actividad_id, plan_id),
+            )
+            duracion_sin_actual = int(cur.fetchone()["duracion_sin_actual"] or 0)
+            if duracion_sin_actual + int(nueva["duracion_estimada"] or 0) > MAX_DURACION_PLAN_SEGUNDOS:
+                raise HTTPException(status_code=422, detail="La duracion total del plan no puede superar 60 minutos")
+
+            ejecucion = _modo_ejecucion_por_tea(plan_context["nivel_tea_validado"])
+            cur.execute(
+                """
+                UPDATE plan_actividades
+                SET actividad_id = %s,
+                    nivel_dificultad_actual = %s,
+                    modo_ejecucion = %s,
+                    requiere_acompanamiento = %s
+                WHERE plan_id = %s AND actividad_id = %s
+                """,
+                (
+                    nueva_actividad_id,
+                    nueva["nivel_dificultad"],
+                    ejecucion["modo_ejecucion"],
+                    ejecucion["requiere_acompanamiento"],
+                    plan_id,
+                    actividad_id,
+                ),
+            )
+
+    return {
+        "ok": True,
+        "plan_id": plan_id,
+        "actividad_id": nueva_actividad_id,
+        "actividad_reemplazada_id": actividad_id,
+    }
+
+
+@router.patch("/api/dashboard/terapeuta/planes/{plan_id}/actividades/{actividad_id}/dificultad")
+def actualizar_dificultad_actividad_plan(
+    plan_id: str,
+    actividad_id: str,
+    req: ActualizarDificultadActividadRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    if current_user["role"] != "terapeuta":
+        raise HTTPException(status_code=403, detail="Solo terapeutas pueden ajustar dificultad")
+
+    nueva = _normalize_dificultad(req.nivel_dificultad)
+    niveles = ["Bajo", "Medio", "Alto"]
+
+    with _conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                "SELECT id FROM terapeutas WHERE usuario_id = %s",
+                (current_user["id"],),
+            )
+            ter = cur.fetchone()
+            if not ter:
+                raise HTTPException(status_code=404, detail="Perfil de terapeuta no encontrado")
+
+            cur.execute(
+                """
+                SELECT
+                    pt.nino_id,
+                    COALESCE(pa.nivel_dificultad_actual, a.nivel_dificultad, pt.nivel_dificultad_actual) AS dificultad_actual,
+                    a.nombre AS actividad_nombre
+                FROM planes_terapeuticos pt
+                JOIN plan_actividades pa ON pa.plan_id = pt.id
+                JOIN actividades a ON a.id = pa.actividad_id
+                WHERE pt.id = %s
+                  AND pa.actividad_id = %s
+                  AND pt.terapeuta_id = %s
+                  AND pt.activo = TRUE
+                """,
+                (plan_id, actividad_id, ter["id"]),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Actividad no encontrada en el plan activo")
+
+            actual = _normalize_dificultad(row["dificultad_actual"])
+            delta = niveles.index(nueva) - niveles.index(actual)
+            direccion = "mantener"
+            if delta > 0:
+                direccion = "aumentar"
+            elif delta < 0:
+                direccion = "reducir"
+
+            accion = {
+                "aumentar": "AUMENTAR_DIFICULTAD",
+                "reducir": "REDUCIR_DIFICULTAD",
+                "mantener": "MANTENER_DIFICULTAD",
+            }[direccion]
+
+            detalle = {
+                "actividad_id": actividad_id,
+                "actividad_nombre": row["actividad_nombre"],
+                "dificultad_actual": actual,
+                "dificultad_sugerida": nueva,
+                "accion": direccion,
+                "origen": req.origen or "manual",
+                "observacion": req.observacion,
+                "tasa_aciertos": req.tasa_aciertos,
+                "muestras": req.muestras,
+            }
+
+            cur.execute(
+                """
+                UPDATE plan_actividades
+                SET nivel_dificultad_actual = %s
+                WHERE plan_id = %s AND actividad_id = %s
+                """,
+                (nueva, plan_id, actividad_id),
+            )
+            cur.execute(
+                """
+                UPDATE planes_terapeuticos
+                SET nivel_dificultad_actual = %s,
+                    criterios_progresion = COALESCE(criterios_progresion, '{}'::jsonb)
+                        || jsonb_build_object('ultimo_ajuste', %s::jsonb)
+                WHERE id = %s
+                """,
+                (nueva, Json(detalle), plan_id),
+            )
+            cur.execute(
+                """
+                INSERT INTO decisiones_clinicas
+                    (terapeuta_id, nino_id, recomendacion_id, accion, observacion)
+                VALUES (%s, %s, %s, %s, %s)
+                RETURNING id, created_at
+                """,
+                (
+                    ter["id"],
+                    row["nino_id"],
+                    "ajuste_dificultad_actividad",
+                    accion,
+                    json.dumps(detalle, ensure_ascii=False),
+                ),
+            )
+            decision = cur.fetchone()
+
+    return {
+        "ok": True,
+        "registrado": True,
+        "decision_id": str(decision["id"]),
+        "created_at": decision["created_at"].isoformat(),
+        **detalle,
+    }
+
+
+@router.patch("/api/dashboard/terapeuta/ninos/{nino_id}/validacion-tea")
+def validar_nivel_tea(
+    nino_id: str,
+    req: ValidarNivelTeaRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    if current_user["role"] != "terapeuta":
+        raise HTTPException(status_code=403, detail="Solo terapeutas pueden validar nivel TEA")
+
+    nivel_tea = _normalize_nivel_tea(req.nivel_tea)
+    ejecucion = _modo_ejecucion_por_tea(nivel_tea)
+
+    with _conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                "SELECT id FROM terapeutas WHERE usuario_id = %s",
+                (current_user["id"],),
+            )
+            ter = cur.fetchone()
+            if not ter:
+                raise HTTPException(status_code=404, detail="Perfil de terapeuta no encontrado")
+
+            cur.execute(
+                """
+                UPDATE ninos
+                SET nivel_tea_validado = %s,
+                    perfil_validado_por = %s,
+                    perfil_validado_at = NOW(),
+                    estado_clinico = CASE
+                        WHEN estado_clinico IN ('pendiente_asignacion', 'vinculado_terapeuta', 'perfil_clinico_incompleto')
+                        THEN 'listo_para_plan'
+                        ELSE estado_clinico
+                    END
+                WHERE id = %s
+                  AND terapeuta_id = %s
+                  AND activo = TRUE
+                RETURNING id, estado_clinico
+                """,
+                (nivel_tea, ter["id"], nino_id, ter["id"]),
+            )
+            nino = cur.fetchone()
+            if not nino:
+                raise HTTPException(status_code=404, detail="NiÃ±o no encontrado para este terapeuta")
+
+            cur.execute(
+                """
+                UPDATE plan_actividades pa
+                SET modo_ejecucion = %s,
+                    requiere_acompanamiento = %s
+                FROM planes_terapeuticos pt
+                WHERE pt.id = pa.plan_id
+                  AND pt.nino_id = %s
+                  AND pt.activo = TRUE
+                """,
+                (ejecucion["modo_ejecucion"], ejecucion["requiere_acompanamiento"], nino_id),
+            )
+
+            detalle = {
+                "nivel_tea": nivel_tea,
+                "requiere_acompanamiento": ejecucion["requiere_acompanamiento"],
+                "observacion": req.observacion,
+            }
+            cur.execute(
+                """
+                INSERT INTO decisiones_clinicas
+                    (terapeuta_id, nino_id, recomendacion_id, accion, observacion)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (
+                    ter["id"],
+                    nino_id,
+                    "validacion_nivel_tea",
+                    "VALIDAR_NIVEL_TEA",
+                    json.dumps(detalle, ensure_ascii=False),
+                ),
+            )
+
+    return {
+        "ok": True,
+        "nino_id": nino_id,
+        "estado_clinico": nino["estado_clinico"],
+        **detalle,
+    }
+
+
+@router.patch("/api/dashboard/terapeuta/planes/{plan_id}/estado")
+def actualizar_estado_plan(
+    plan_id: str,
+    req: ActualizarEstadoPlanRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    if current_user["role"] != "terapeuta":
+        raise HTTPException(status_code=403, detail="Solo terapeutas pueden aprobar o publicar planes")
+
+    estado = _normalize_estado_plan(req.estado)
+
+    with _conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                "SELECT id FROM terapeutas WHERE usuario_id = %s",
+                (current_user["id"],),
+            )
+            ter = cur.fetchone()
+            if not ter:
+                raise HTTPException(status_code=404, detail="Perfil de terapeuta no encontrado")
+
+            if estado in ("aprobado", "publicado"):
+                cur.execute(
+                    """
+                    UPDATE ninos n
+                    SET perfil_validado_por = %s,
+                        perfil_validado_at = COALESCE(n.perfil_validado_at, NOW())
+                    FROM planes_terapeuticos pt
+                    WHERE pt.nino_id = n.id
+                      AND pt.id = %s
+                      AND pt.terapeuta_id = %s
+                      AND n.nivel_tea_validado IS NOT NULL
+                      AND n.activo = TRUE
+                    """,
+                    (ter["id"], plan_id, ter["id"]),
+                )
+
+            resumen = None
+            if estado in ("aprobado", "publicado"):
+                resumen = _validar_plan_publicable(cur, plan_id, str(ter["id"]))
+
+            cur.execute(
+                """
+                UPDATE planes_terapeuticos
+                SET estado_plan = %s,
+                    aprobado_at = CASE
+                        WHEN %s IN ('aprobado', 'publicado') THEN COALESCE(aprobado_at, NOW())
+                        WHEN %s = 'borrador' THEN NULL
+                        ELSE aprobado_at
+                    END,
+                    publicado_at = CASE
+                        WHEN %s = 'publicado' THEN COALESCE(publicado_at, NOW())
+                        WHEN %s = 'borrador' THEN NULL
+                        ELSE publicado_at
+                    END,
+                    publicado_para_tutor = (%s = 'publicado')
+                WHERE id = %s
+                  AND terapeuta_id = %s
+                  AND activo = TRUE
+                RETURNING id, nino_id, estado_plan, aprobado_at, publicado_at, publicado_para_tutor
+                """,
+                (estado, estado, estado, estado, estado, estado, plan_id, ter["id"]),
+            )
+            plan = cur.fetchone()
+            if not plan:
+                raise HTTPException(status_code=404, detail="Plan activo no encontrado para este terapeuta")
+
+            if estado == "publicado":
+                cur.execute(
+                    "UPDATE ninos SET estado_clinico = 'plan_activo' WHERE id = %s",
+                    (plan["nino_id"],),
+                )
+
+                # Contar planes para saber el número de sesión
+                cur.execute(
+                    "SELECT COUNT(*) AS total FROM planes_terapeuticos WHERE nino_id = %s",
+                    (plan["nino_id"],),
+                )
+                count_row = cur.fetchone()
+                sesion_numero = count_row["total"] if count_row and count_row["total"] else 1
+                
+                # Obtener nombre del niño
+                cur.execute("SELECT nombre FROM ninos WHERE id = %s", (plan["nino_id"],))
+                nino_row = cur.fetchone()
+                nino_nombre = nino_row["nombre"] if nino_row else "tu hijo/a"
+                
+                mensaje = f"¡Buenas noticias! El plan terapéutico de tu hijo/a {nino_nombre} para la sesión {sesion_numero} ya está disponible y aprobado."
+                _crear_notificacion_tutor(cur, plan["nino_id"], "Nuevo plan terapéutico", mensaje)
+
+            detalle = {
+                "plan_id": plan_id,
+                "estado": estado,
+                "observacion": req.observacion,
+                "resumen_reglas": resumen,
+            }
+            cur.execute(
+                """
+                INSERT INTO decisiones_clinicas
+                    (terapeuta_id, nino_id, recomendacion_id, accion, observacion)
+                VALUES (%s, %s, %s, %s, %s)
+                """,
+                (
+                    ter["id"],
+                    plan["nino_id"],
+                    "estado_plan",
+                    f"PLAN_{estado.upper()}",
+                    json.dumps(detalle, ensure_ascii=False, default=str),
+                ),
+            )
+
+    return {
+        "ok": True,
+        "plan_id": str(plan["id"]),
+        "nino_id": str(plan["nino_id"]),
+        "estado_plan": plan["estado_plan"],
+        "aprobado_at": plan["aprobado_at"].isoformat() if plan["aprobado_at"] else None,
+        "publicado_at": plan["publicado_at"].isoformat() if plan["publicado_at"] else None,
+        "publicado_para_tutor": plan["publicado_para_tutor"],
+        "resumen_reglas": resumen,
+    }
+
 
 @router.get("/api/ninos/{nino_id}/plan")
 def obtener_plan_activo(
@@ -1154,34 +2083,114 @@ def obtener_plan_activo(
 ):
     with _conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(
-                """
-                SELECT
-                    pt.id, pt.nombre, pt.nino_id, n.nombre AS nino_nombre,
-                    pt.nivel_dificultad_actual
-                FROM planes_terapeuticos pt
-                JOIN ninos n ON n.id = pt.nino_id
-                WHERE pt.nino_id = %s AND pt.activo = TRUE
-                ORDER BY pt.fecha_inicio DESC
-                LIMIT 1
-                """,
-                (nino_id,),
-            )
+            role = current_user["role"]
+            if role in ("padre_tutor", "tutor"):
+                cur.execute(
+                    "SELECT id FROM padres_tutores WHERE usuario_id = %s",
+                    (current_user["id"],),
+                )
+                tutor = cur.fetchone()
+                if not tutor:
+                    raise HTTPException(status_code=404, detail="Perfil de tutor no encontrado")
+                cur.execute(
+                    """
+                    SELECT
+                        pt.id, pt.nombre, pt.nino_id, n.nombre AS nino_nombre,
+                        pt.nivel_dificultad_actual, pt.estado_plan,
+                        pt.aprobado_at, pt.publicado_at, pt.publicado_para_tutor,
+                        pt.limite_actividades, pt.limite_duracion_segundos,
+                        n.nivel_tea_validado
+                    FROM planes_terapeuticos pt
+                    JOIN ninos n ON n.id = pt.nino_id
+                    WHERE pt.nino_id = %s
+                      AND pt.activo = TRUE
+                      AND n.tutor_id = %s
+                      AND pt.estado_plan = 'publicado'
+                      AND pt.publicado_para_tutor = TRUE
+                ORDER BY pt.created_at DESC, pt.fecha_inicio DESC
+                    LIMIT 1
+                    """,
+                    (nino_id, tutor["id"]),
+                )
+            elif role == "terapeuta":
+                cur.execute(
+                    "SELECT id FROM terapeutas WHERE usuario_id = %s",
+                    (current_user["id"],),
+                )
+                ter = cur.fetchone()
+                if not ter:
+                    raise HTTPException(status_code=404, detail="Perfil de terapeuta no encontrado")
+                cur.execute(
+                    """
+                    SELECT
+                        pt.id, pt.nombre, pt.nino_id, n.nombre AS nino_nombre,
+                        pt.nivel_dificultad_actual, pt.estado_plan,
+                        pt.aprobado_at, pt.publicado_at, pt.publicado_para_tutor,
+                        pt.limite_actividades, pt.limite_duracion_segundos,
+                        n.nivel_tea_validado
+                    FROM planes_terapeuticos pt
+                    JOIN ninos n ON n.id = pt.nino_id
+                    WHERE pt.nino_id = %s
+                      AND pt.activo = TRUE
+                      AND pt.terapeuta_id = %s
+                ORDER BY pt.created_at DESC, pt.fecha_inicio DESC
+                    LIMIT 1
+                    """,
+                    (nino_id, ter["id"]),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT
+                        pt.id, pt.nombre, pt.nino_id, n.nombre AS nino_nombre,
+                        pt.nivel_dificultad_actual, pt.estado_plan,
+                        pt.aprobado_at, pt.publicado_at, pt.publicado_para_tutor,
+                        pt.limite_actividades, pt.limite_duracion_segundos,
+                        n.nivel_tea_validado
+                    FROM planes_terapeuticos pt
+                    JOIN ninos n ON n.id = pt.nino_id
+                    WHERE pt.nino_id = %s AND pt.activo = TRUE
+                ORDER BY pt.created_at DESC, pt.fecha_inicio DESC
+                    LIMIT 1
+                    """,
+                    (nino_id,),
+                )
             plan = cur.fetchone()
             if not plan:
-                raise HTTPException(status_code=404, detail="Plan activo no encontrado")
+                raise HTTPException(status_code=404, detail="Plan publicado no encontrado")
+
+            # Calcular el número de sesión (total de planes creados para este niño)
+            cur.execute(
+                "SELECT COUNT(*) AS total FROM planes_terapeuticos WHERE nino_id = %s",
+                (nino_id,),
+            )
+            count_row = cur.fetchone()
+            sesion_numero = count_row["total"] if count_row and count_row["total"] else 1
 
             cur.execute(
                 """
                 SELECT a.id, a.nombre, a.tipo, a.instrucciones,
-                       a.nivel_dificultad, a.duracion_estimada,
-                       a.recursos_multimedia
+                       COALESCE(pa.nivel_dificultad_actual, a.nivel_dificultad) AS nivel_dificultad,
+                       a.nivel_dificultad AS nivel_catalogo,
+                       a.duracion_estimada,
+                       a.recursos_multimedia,
+                       pa.modo_ejecucion,
+                       pa.requiere_acompanamiento,
+                       EXISTS (
+                           SELECT 1
+                           FROM sesiones s
+                           JOIN resultados_actividad ra ON ra.sesion_id = s.id
+                           WHERE s.plan_id = pa.plan_id
+                             AND s.nino_id = %s
+                             AND s.estado = 'completada'
+                             AND ra.actividad_id = pa.actividad_id
+                       ) AS completada
                 FROM plan_actividades pa
                 JOIN actividades a ON a.id = pa.actividad_id
                 WHERE pa.plan_id = %s
                 ORDER BY pa.orden
                 """,
-                (plan["id"],),
+                (nino_id, plan["id"]),
             )
             actividades = cur.fetchall()
 
@@ -1191,6 +2200,14 @@ def obtener_plan_activo(
         "nino_id": str(plan["nino_id"]),
         "nino_nombre": plan["nino_nombre"],
         "nivel_dificultad_actual": plan["nivel_dificultad_actual"],
+        "estado_plan": plan["estado_plan"],
+        "sesion_numero": sesion_numero,
+        "aprobado_at": plan["aprobado_at"].isoformat() if plan["aprobado_at"] else None,
+        "publicado_at": plan["publicado_at"].isoformat() if plan["publicado_at"] else None,
+        "publicado_para_tutor": plan["publicado_para_tutor"],
+        "limite_actividades": plan["limite_actividades"],
+        "limite_duracion_segundos": plan["limite_duracion_segundos"],
+        "nivel_tea_validado": plan["nivel_tea_validado"],
         "actividades": [
             {
                 "id": str(a["id"]),
@@ -1198,8 +2215,12 @@ def obtener_plan_activo(
                 "tipo": a["tipo"],
                 "instrucciones": a["instrucciones"],
                 "nivel_dificultad": a["nivel_dificultad"],
+                "nivel_catalogo": a["nivel_catalogo"],
                 "duracion_estimada": a["duracion_estimada"],
                 "materiales": (a["recursos_multimedia"] or {}).get("materiales", []),
+                "modo_ejecucion": a["modo_ejecucion"],
+                "requiere_acompanamiento": a["requiere_acompanamiento"],
+                "completada": a["completada"],
             }
             for a in actividades
         ],
@@ -1214,8 +2235,16 @@ def crear_sesion(
     req: CrearSesionRequest,
     current_user: dict = Depends(get_current_user),
 ):
-    if current_user["role"] != "terapeuta":
-        raise HTTPException(status_code=403, detail="Solo terapeutas pueden registrar sesiones")
+    if current_user["role"] == "terapeuta":
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "El terapeuta valida y supervisa el plan, pero la ejecucion de "
+                "actividades terapeuticas publicadas corresponde al tutor."
+            ),
+        )
+    if current_user["role"] not in ("padre_tutor", "tutor"):
+        raise HTTPException(status_code=403, detail="Solo el tutor puede registrar ejecuciones de plan")
     if not req.resultados:
         raise HTTPException(status_code=400, detail="La sesion debe incluir resultados")
 
@@ -1228,29 +2257,130 @@ def crear_sesion(
     with _conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
+                "SELECT id FROM padres_tutores WHERE usuario_id = %s",
+                (current_user["id"],),
+            )
+            tutor = cur.fetchone()
+            if not tutor:
+                raise HTTPException(status_code=404, detail="Perfil de tutor no encontrado")
+
+            cur.execute(
                 """
                 SELECT pt.id, pt.nino_id, pt.nivel_dificultad_actual
                 FROM planes_terapeuticos pt
-                JOIN terapeutas t ON t.id = pt.terapeuta_id
+                JOIN ninos n ON n.id = pt.nino_id
                 WHERE pt.id = %s
                   AND pt.nino_id = %s
                   AND pt.activo = TRUE
-                  AND t.usuario_id = %s
+                  AND pt.estado_plan = 'publicado'
+                  AND pt.publicado_para_tutor = TRUE
+                  AND n.tutor_id = %s
                 """,
-                (req.plan_id, req.nino_id, current_user["id"]),
+                (req.plan_id, req.nino_id, tutor["id"]),
             )
             plan = cur.fetchone()
             if not plan:
-                raise HTTPException(status_code=404, detail="Plan activo no encontrado para el terapeuta")
+                raise HTTPException(status_code=404, detail="Plan publicado no encontrado para este tutor")
+
+            actividad_ids = [resultado.actividad_id for resultado in req.resultados]
+            cur.execute(
+                """
+                SELECT COUNT(*) AS actividades_validas
+                FROM plan_actividades
+                WHERE plan_id = %s
+                  AND actividad_id = ANY(%s::uuid[])
+                """,
+                (req.plan_id, actividad_ids),
+            )
+            validas = int(cur.fetchone()["actividades_validas"] or 0)
+            if validas != len(set(actividad_ids)):
+                raise HTTPException(status_code=400, detail="La sesion incluye actividades que no pertenecen al plan publicado")
+
+            cur.execute(
+                """
+                SELECT a.id, COALESCE(a.duracion_estimada, 0) AS duracion_estimada
+                FROM plan_actividades pa
+                JOIN actividades a ON a.id = pa.actividad_id
+                WHERE pa.plan_id = %s
+                  AND pa.actividad_id = ANY(%s::uuid[])
+                """,
+                (req.plan_id, actividad_ids),
+            )
+            duraciones = {
+                str(row["id"]): int(row["duracion_estimada"] or 0)
+                for row in cur.fetchall()
+            }
+            for resultado in req.resultados:
+                segundos = float(resultado.tiempo_respuesta or 0)
+                if segundos < MIN_TIEMPO_ACTIVIDAD_SEGUNDOS:
+                    raise HTTPException(
+                        status_code=422,
+                        detail={
+                            "codigo": "actividad_muy_rapida",
+                            "mensaje": "Tiempo minimo de actividad no alcanzado.",
+                            "minimo_segundos": MIN_TIEMPO_ACTIVIDAD_SEGUNDOS,
+                        },
+                    )
+                duracion = duraciones.get(str(resultado.actividad_id), 0)
+                if duracion > 0 and segundos > duracion:
+                    raise HTTPException(
+                        status_code=422,
+                        detail={
+                            "codigo": "tiempo_agotado",
+                            "mensaje": "El tiempo estimado de la actividad termino.",
+                            "duracion_estimada_segundos": duracion,
+                        },
+                    )
+
+            cur.execute(
+                """
+                SELECT
+                    s.id AS sesion_id,
+                    ra.actividad_id,
+                    ra.aciertos,
+                    ra.repeticiones,
+                    COALESCE(pa.nivel_dificultad_actual, a.nivel_dificultad, pt.nivel_dificultad_actual) AS nivel_dificultad_actual
+                FROM sesiones s
+                JOIN resultados_actividad ra ON ra.sesion_id = s.id
+                JOIN planes_terapeuticos pt ON pt.id = s.plan_id
+                JOIN actividades a ON a.id = ra.actividad_id
+                LEFT JOIN plan_actividades pa
+                  ON pa.plan_id = s.plan_id
+                 AND pa.actividad_id = ra.actividad_id
+                WHERE s.nino_id = %s
+                  AND s.plan_id = %s
+                  AND s.estado = 'completada'
+                  AND ra.actividad_id = ANY(%s::uuid[])
+                ORDER BY s.fecha_inicio DESC
+                LIMIT 1
+                """,
+                (req.nino_id, req.plan_id, actividad_ids),
+            )
+            existente = cur.fetchone()
+            if existente:
+                total_intentos = int(existente["repeticiones"] or 0)
+                total_aciertos = int(existente["aciertos"] or 0)
+                tasa = round(total_aciertos / total_intentos, 4) if total_intentos else 0
+                return {
+                    "ok": True,
+                    "ya_registrada": True,
+                    "sesion_id": str(existente["sesion_id"]),
+                    "total_aciertos": total_aciertos,
+                    "total_intentos": total_intentos,
+                    "tasa_aciertos": tasa,
+                    "nivel_dificultad_recomendado": existente["nivel_dificultad_actual"],
+                    "ajustes_dificultad": [],
+                }
 
             cur.execute(
                 """
                 INSERT INTO sesiones
-                    (nino_id, plan_id, fecha_inicio, fecha_fin, estado, sync_at)
-                VALUES (%s, %s, NOW(), NOW(), 'completada', NOW())
+                    (nino_id, plan_id, fecha_inicio, fecha_fin, estado, sync_at,
+                     ejecutado_por_rol, ejecutado_por_usuario_id, origen_registro)
+                VALUES (%s, %s, NOW(), NOW(), 'completada', NOW(), %s, %s, 'familia_app')
                 RETURNING id
                 """,
-                (req.nino_id, req.plan_id),
+                (req.nino_id, req.plan_id, current_user["role"], current_user["id"]),
             )
             sesion = cur.fetchone()
 
@@ -1346,6 +2476,341 @@ def obtener_ajustes_dificultad(
 
 # ── PATCH /api/ninos/{nino_id}/perfil-clinico ─────────────────────────────────
 
+@router.post("/api/sesiones/{sesion_id}/solicitud-ajuste")
+def solicitar_ajuste_dificultad(
+    sesion_id: str,
+    req: SolicitarAjusteDificultadRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    if current_user["role"] not in ("padre_tutor", "tutor"):
+        raise HTTPException(status_code=403, detail="Solo el tutor puede solicitar ajustes")
+
+    direccion = (req.accion or "").lower()
+    if direccion not in ("aumentar", "reducir"):
+        raise HTTPException(status_code=400, detail="Accion de ajuste invalida")
+
+    with _conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                "SELECT id FROM padres_tutores WHERE usuario_id = %s",
+                (current_user["id"],),
+            )
+            tutor = cur.fetchone()
+            if not tutor:
+                raise HTTPException(status_code=404, detail="Perfil de tutor no encontrado")
+
+            cur.execute(
+                """
+                SELECT
+                    s.id AS sesion_id,
+                    s.nino_id,
+                    s.plan_id,
+                    n.nombre AS nino_nombre,
+                    pt.terapeuta_id,
+                    a.nombre AS actividad_nombre,
+                    ra.aciertos,
+                    ra.repeticiones
+                FROM sesiones s
+                JOIN ninos n ON n.id = s.nino_id
+                JOIN planes_terapeuticos pt ON pt.id = s.plan_id
+                JOIN resultados_actividad ra ON ra.sesion_id = s.id
+                JOIN actividades a ON a.id = ra.actividad_id
+                WHERE s.id = %s
+                  AND s.plan_id = %s
+                  AND ra.actividad_id = %s
+                  AND n.tutor_id = %s
+                  AND s.estado = 'completada'
+                """,
+                (sesion_id, req.plan_id, req.actividad_id, tutor["id"]),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Sesion o actividad no encontrada para este tutor")
+
+            detalle = {
+                "sesion_id": sesion_id,
+                "plan_id": req.plan_id,
+                "nino_id": str(row["nino_id"]),
+                "nino_nombre": row["nino_nombre"],
+                "actividad_id": req.actividad_id,
+                "actividad_nombre": row["actividad_nombre"],
+                "accion": direccion,
+                "dificultad_actual": _normalize_dificultad(req.dificultad_actual),
+                "dificultad_sugerida": _normalize_dificultad(req.dificultad_sugerida),
+                "tasa_aciertos": req.tasa_aciertos,
+                "muestras": req.muestras,
+                "aciertos": row["aciertos"],
+                "intentos": row["repeticiones"],
+                "observacion_tutor": req.observacion,
+            }
+            cur.execute(
+                """
+                INSERT INTO decisiones_clinicas
+                    (terapeuta_id, nino_id, recomendacion_id, accion, observacion)
+                VALUES (%s, %s, %s, %s, %s)
+                RETURNING id, created_at
+                """,
+                (
+                    row["terapeuta_id"],
+                    row["nino_id"],
+                    "solicitud_ajuste_dificultad",
+                    "SOLICITAR_AUMENTAR_DIFICULTAD" if direccion == "aumentar" else "SOLICITAR_REDUCIR_DIFICULTAD",
+                    json.dumps(detalle, ensure_ascii=False),
+                ),
+            )
+            decision = cur.fetchone()
+            cur.execute(
+                """
+                INSERT INTO notificaciones (usuario_id, titulo, mensaje)
+                SELECT t.usuario_id, %s, %s
+                FROM terapeutas t
+                WHERE t.id = %s
+                """,
+                (
+                    "Solicitud de ajuste de dificultad",
+                    f"La familia solicito {direccion} la dificultad de {row['actividad_nombre']} para {row['nino_nombre']}.",
+                    row["terapeuta_id"],
+                ),
+            )
+
+    return {
+        "ok": True,
+        "solicitud_id": str(decision["id"]),
+        "created_at": decision["created_at"].isoformat(),
+        **detalle,
+    }
+
+
+@router.get("/api/ninos/{nino_id}/sesiones-revision")
+def obtener_sesiones_revision(
+    nino_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    if current_user["role"] != "terapeuta":
+        raise HTTPException(status_code=403, detail="Solo terapeutas pueden revisar sesiones")
+
+    with _conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT id FROM terapeutas WHERE usuario_id = %s", (current_user["id"],))
+            ter = cur.fetchone()
+            if not ter:
+                raise HTTPException(status_code=404, detail="Perfil de terapeuta no encontrado")
+
+            cur.execute(
+                "SELECT id, nombre FROM ninos WHERE id = %s AND terapeuta_id = %s AND activo = TRUE",
+                (nino_id, ter["id"]),
+            )
+            nino = cur.fetchone()
+            if not nino:
+                raise HTTPException(status_code=404, detail="Nino no encontrado para este terapeuta")
+
+            cur.execute(
+                """
+                SELECT
+                    s.id AS sesion_id,
+                    s.plan_id,
+                    s.fecha_inicio,
+                    ROW_NUMBER() OVER (PARTITION BY s.nino_id ORDER BY s.fecha_inicio ASC) AS sesion_numero,
+                    ROUND(CAST(SUM(ra.aciertos) AS NUMERIC) / NULLIF(SUM(ra.repeticiones), 0), 4) AS tasa_aciertos,
+                    SUM(ra.aciertos) AS total_aciertos,
+                    SUM(ra.repeticiones) AS total_intentos
+                FROM sesiones s
+                JOIN resultados_actividad ra ON ra.sesion_id = s.id
+                JOIN planes_terapeuticos pt ON pt.id = s.plan_id
+                WHERE s.nino_id = %s
+                  AND pt.terapeuta_id = %s
+                  AND s.estado = 'completada'
+                GROUP BY s.id, s.plan_id, s.fecha_inicio, s.nino_id
+                ORDER BY s.fecha_inicio DESC
+                LIMIT 20
+                """,
+                (nino_id, ter["id"]),
+            )
+            sesiones = cur.fetchall()
+            sesion_ids = [row["sesion_id"] for row in sesiones]
+
+            resultados_por_sesion: Dict[str, List[Dict[str, Any]]] = {}
+            if sesion_ids:
+                cur.execute(
+                    """
+                    SELECT
+                        ra.sesion_id,
+                        ra.actividad_id,
+                        a.nombre AS actividad_nombre,
+                        a.instrucciones,
+                        ra.aciertos,
+                        ra.repeticiones,
+                        ra.tiempo_respuesta,
+                        ra.nivel_ayuda_requerido,
+                        ra.nivel_dificultad_usado,
+                        ra.observaciones
+                    FROM resultados_actividad ra
+                    JOIN actividades a ON a.id = ra.actividad_id
+                    WHERE ra.sesion_id = ANY(%s::uuid[])
+                    ORDER BY ra.timestamp ASC
+                    """,
+                    (sesion_ids,),
+                )
+                for row in cur.fetchall():
+                    resultados_por_sesion.setdefault(str(row["sesion_id"]), []).append(row)
+
+            cur.execute(
+                """
+                SELECT id, accion, recomendacion_id, observacion, created_at
+                FROM decisiones_clinicas
+                WHERE nino_id = %s
+                  AND terapeuta_id = %s
+                  AND (
+                    accion IN ('SOLICITAR_AUMENTAR_DIFICULTAD', 'SOLICITAR_REDUCIR_DIFICULTAD')
+                    OR recomendacion_id IN ('resolver_solicitud_ajuste', 'ajuste_dificultad_actividad')
+                  )
+                ORDER BY created_at DESC
+                """,
+                (nino_id, ter["id"]),
+            )
+            decisiones = cur.fetchall()
+
+    solicitudes: Dict[str, Dict[str, Any]] = {}
+    resoluciones: Dict[str, Dict[str, Any]] = {}
+    for row in decisiones:
+        try:
+            detalle = json.loads(row["observacion"] or "{}")
+        except json.JSONDecodeError:
+            detalle = {}
+        solicitud_id = detalle.get("solicitud_id")
+        if solicitud_id:
+            resoluciones[str(solicitud_id)] = {"accion": row["accion"], "created_at": row["created_at"].isoformat(), **detalle}
+            continue
+        if row["accion"] in ("SOLICITAR_AUMENTAR_DIFICULTAD", "SOLICITAR_REDUCIR_DIFICULTAD"):
+            detalle["id"] = str(row["id"])
+            detalle["created_at"] = row["created_at"].isoformat()
+            detalle["estado"] = "pendiente"
+            solicitudes[str(row["id"])] = detalle
+
+    for solicitud_id, resolucion in resoluciones.items():
+        if solicitud_id in solicitudes:
+            solicitudes[solicitud_id]["estado"] = (
+                "aprobada" if resolucion["accion"] in ("AUMENTAR_DIFICULTAD", "REDUCIR_DIFICULTAD") else "rechazada"
+            )
+            solicitudes[solicitud_id]["resolucion"] = resolucion
+
+    payload_sesiones = []
+    for sesion in sesiones:
+        sid = str(sesion["sesion_id"])
+        actividades = []
+        for actividad in resultados_por_sesion.get(sid, []):
+            aid = str(actividad["actividad_id"])
+            solicitud = next(
+                (item for item in solicitudes.values() if item.get("sesion_id") == sid and item.get("actividad_id") == aid),
+                None,
+            )
+            intentos = int(actividad["repeticiones"] or 0)
+            aciertos = int(actividad["aciertos"] or 0)
+            actividades.append({
+                "actividad_id": aid,
+                "actividad_nombre": actividad["actividad_nombre"],
+                "instrucciones": actividad["instrucciones"],
+                "aciertos": aciertos,
+                "intentos": intentos,
+                "tasa_aciertos": round(aciertos / intentos, 4) if intentos else 0,
+                "tiempo_respuesta": actividad["tiempo_respuesta"],
+                "nivel_ayuda_requerido": actividad["nivel_ayuda_requerido"],
+                "nivel_dificultad_usado": actividad["nivel_dificultad_usado"],
+                "observaciones": actividad["observaciones"],
+                "solicitud_ajuste": solicitud,
+            })
+        payload_sesiones.append({
+            "id": sid,
+            "plan_id": str(sesion["plan_id"]),
+            "sesion_numero": int(sesion["sesion_numero"] or 1),
+            "fecha": sesion["fecha_inicio"].isoformat(),
+            "tasa_aciertos": float(sesion["tasa_aciertos"] or 0),
+            "total_aciertos": int(sesion["total_aciertos"] or 0),
+            "total_intentos": int(sesion["total_intentos"] or 0),
+            "actividades": actividades,
+        })
+
+    return {"nino_id": nino_id, "nino_nombre": nino["nombre"], "sesiones": payload_sesiones}
+
+
+@router.post("/api/dashboard/terapeuta/solicitudes-ajuste/{decision_id}/resolver")
+def resolver_solicitud_ajuste(
+    decision_id: str,
+    req: ResolverSolicitudAjusteRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    if current_user["role"] != "terapeuta":
+        raise HTTPException(status_code=403, detail="Solo terapeutas pueden resolver solicitudes")
+
+    with _conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT id FROM terapeutas WHERE usuario_id = %s", (current_user["id"],))
+            ter = cur.fetchone()
+            if not ter:
+                raise HTTPException(status_code=404, detail="Perfil de terapeuta no encontrado")
+
+            cur.execute(
+                """
+                SELECT id, nino_id, accion, observacion
+                FROM decisiones_clinicas
+                WHERE id = %s
+                  AND terapeuta_id = %s
+                  AND accion IN ('SOLICITAR_AUMENTAR_DIFICULTAD', 'SOLICITAR_REDUCIR_DIFICULTAD')
+                """,
+                (decision_id, ter["id"]),
+            )
+            solicitud = cur.fetchone()
+            if not solicitud:
+                raise HTTPException(status_code=404, detail="Solicitud no encontrada")
+            try:
+                detalle = json.loads(solicitud["observacion"] or "{}")
+            except json.JSONDecodeError:
+                raise HTTPException(status_code=400, detail="Solicitud sin detalle valido")
+
+            sugerida = _normalize_dificultad(detalle.get("dificultad_sugerida"))
+            accion = "RECHAZAR_AJUSTE_DIFICULTAD"
+            if req.aceptar:
+                accion = "AUMENTAR_DIFICULTAD" if detalle.get("accion") == "aumentar" else "REDUCIR_DIFICULTAD"
+                cur.execute(
+                    """
+                    UPDATE plan_actividades
+                    SET nivel_dificultad_actual = %s
+                    WHERE plan_id = %s AND actividad_id = %s
+                    """,
+                    (sugerida, detalle.get("plan_id"), detalle.get("actividad_id")),
+                )
+                cur.execute(
+                    """
+                    UPDATE planes_terapeuticos
+                    SET nivel_dificultad_actual = %s,
+                        criterios_progresion = COALESCE(criterios_progresion, '{}'::jsonb)
+                            || jsonb_build_object('ultimo_ajuste', %s::jsonb)
+                    WHERE id = %s AND terapeuta_id = %s
+                    """,
+                    (sugerida, Json({**detalle, "solicitud_id": decision_id}), detalle.get("plan_id"), ter["id"]),
+                )
+
+            resolucion = {**detalle, "solicitud_id": decision_id, "aceptar": req.aceptar, "observacion_terapeuta": req.observacion}
+            cur.execute(
+                """
+                INSERT INTO decisiones_clinicas
+                    (terapeuta_id, nino_id, recomendacion_id, accion, observacion)
+                VALUES (%s, %s, %s, %s, %s)
+                RETURNING id, created_at
+                """,
+                (ter["id"], solicitud["nino_id"], "resolver_solicitud_ajuste", accion, json.dumps(resolucion, ensure_ascii=False)),
+            )
+            decision = cur.fetchone()
+
+    return {
+        "ok": True,
+        "decision_id": str(decision["id"]),
+        "created_at": decision["created_at"].isoformat(),
+        "estado": "aprobada" if req.aceptar else "rechazada",
+        **resolucion,
+    }
+
+
 @router.patch("/api/ninos/{nino_id}/perfil-clinico")
 def actualizar_perfil_clinico(
     nino_id: str,
@@ -1369,23 +2834,38 @@ def actualizar_perfil_clinico(
     if not updates:
         raise HTTPException(status_code=400, detail="Sin campos válidos para actualizar")
 
-    set_clauses = []
-    values = []
-    for key, value in updates.items():
-        if key == "perfil_sensorial":
-            set_clauses.append(f"{key} = %s::jsonb")
-            values.append(Json(value))
-        else:
-            set_clauses.append(f"{key} = %s")
-            values.append(value)
-
-    if updates.get("estado_clinico") == "listo_para_plan":
-        set_clauses.append("perfil_completado_at = NOW()")
-
-    values.append(nino_id)
-
     with _conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                "SELECT perfil_sensorial FROM ninos WHERE id = %s AND activo = TRUE",
+                (nino_id,),
+            )
+            nino_row = cur.fetchone()
+            if not nino_row:
+                raise HTTPException(status_code=404, detail="Niño no encontrado")
+            
+            existing_perfil = nino_row["perfil_sensorial"] or {}
+            
+            if "perfil_sensorial" in updates:
+                merged_perfil = dict(existing_perfil)
+                merged_perfil.update(updates["perfil_sensorial"])
+                updates["perfil_sensorial"] = merged_perfil
+
+            set_clauses = []
+            values = []
+            for key, value in updates.items():
+                if key == "perfil_sensorial":
+                    set_clauses.append(f"{key} = %s::jsonb")
+                    values.append(Json(value))
+                else:
+                    set_clauses.append(f"{key} = %s")
+                    values.append(value)
+
+            if updates.get("estado_clinico") == "listo_para_plan":
+                set_clauses.append("perfil_completado_at = NOW()")
+
+            values.append(nino_id)
+
             cur.execute(
                 f"UPDATE ninos SET {', '.join(set_clauses)} WHERE id = %s RETURNING id, estado_clinico",
                 values,
@@ -1428,7 +2908,10 @@ def generar_plan_ia(
 
             cur.execute(
                 """
-                SELECT id, nombre, fecha_nacimiento, nivel_cognitivo, perfil_sensorial, objetivos_intervencion, estado_clinico
+                SELECT
+                    id, nombre, fecha_nacimiento, nivel_cognitivo, diagnostico, perfil_sensorial,
+                    objetivos_intervencion, estado_clinico, nivel_tea_validado,
+                    perfil_validado_at
                 FROM ninos
                 WHERE id = %s AND activo = TRUE
                 """,
@@ -1438,9 +2921,36 @@ def generar_plan_ia(
             if not nino:
                 raise HTTPException(status_code=404, detail="Niño no encontrado")
 
-            # Validar que exista un perfil clínico-funcional completo (GIVEN de la Historia de Usuario)
             perfil_sensorial = nino.get("perfil_sensorial") or {}
-            objetivos = nino.get("objetivos_intervencion") or []
+            triaje = _triaje_from_perfil(perfil_sensorial)
+            requiere_scq = bool(triaje.get("requiere_scq", False))
+            tiene_evidencia = _perfil_tiene_evidencia_clinica(
+                perfil_sensorial,
+                nino.get("diagnostico"),
+            )
+            perfil_obligatorio = requiere_scq and not tiene_evidencia
+
+            if perfil_obligatorio and (
+                not nino.get("nivel_tea_validado") or not nino.get("perfil_validado_at")
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "mensaje": (
+                            "Este caso viene de SCQ sin evidencia clinica previa. "
+                            "El terapeuta debe validar el perfil clinico y el nivel TEA "
+                            "antes de generar el plan terapeutico."
+                        )
+                    },
+                )
+
+            nivel_tea_plan = nino.get("nivel_tea_validado") or _infer_nivel_tea(
+                nino.get("diagnostico"),
+                perfil_sensorial,
+            )
+            objetivos = nino.get("objetivos_intervencion") or _objetivos_desde_perfil(perfil_sensorial)
+            nino["objetivos_intervencion"] = objetivos
+            nino["nivel_tea_validado"] = nivel_tea_plan
             
             # Un perfil se considera completo si tiene fecha de nacimiento, nivel cognitivo/apoyo,
             # y datos de perfil sensorial y objetivos cargados
@@ -1456,12 +2966,18 @@ def generar_plan_ia(
                     }
                 )
 
-            # Verificar si ya tiene plan activo
+            # Verificar si ya tiene plan activo y calcular el siguiente numero de sesion.
             cur.execute(
-                "SELECT id FROM planes_terapeuticos WHERE nino_id = %s AND activo = TRUE",
+                "SELECT id FROM planes_terapeuticos WHERE nino_id = %s AND activo = TRUE ORDER BY created_at DESC LIMIT 1",
                 (nino_id,),
             )
             existing = cur.fetchone()
+            cur.execute(
+                "SELECT COUNT(*) AS total FROM planes_terapeuticos WHERE nino_id = %s",
+                (nino_id,),
+            )
+            total_planes = int((cur.fetchone() or {}).get("total") or 0)
+            siguiente_sesion = total_planes + 1
 
             # Procesar el motor adaptativo Random Forest (WHEN de la Historia de Usuario)
             # El motor procesa edad, nivel_cognitivo (apoyo), perfil_sensorial, y objetivos (habilidades)
@@ -1479,43 +2995,35 @@ def generar_plan_ia(
                 cur.execute(
                     """
                     UPDATE planes_terapeuticos
-                    SET nivel_dificultad_actual = %s,
-                        criterios_progresion = %s::jsonb
+                    SET activo = FALSE,
+                        fecha_fin = CURRENT_DATE
                     WHERE id = %s
-                    RETURNING id
                     """,
-                    (
-                        nivel_dificultad_db,
-                        '{"umbralAciertos": 0.8, "sesionesConsecutivas": 3}',
-                        existing["id"],
-                    ),
+                    (existing["id"],),
                 )
-                plan = cur.fetchone()
-                cur.execute("DELETE FROM plan_actividades WHERE plan_id = %s", (plan["id"],))
-            else:
-                cur.execute(
-                    """
-                    INSERT INTO planes_terapeuticos
-                        (nombre, nino_id, terapeuta_id, fecha_inicio, nivel_dificultad_actual,
-                         criterios_progresion, activo)
-                    VALUES (%s, %s, %s, CURRENT_DATE, %s, %s::jsonb, TRUE)
-                    RETURNING id
-                    """,
-                    (
-                        f"Plan IA — {nino['nombre']}",
-                        nino_id,
-                        ter["id"],
-                        nivel_dificultad_db,
-                        '{"umbralAciertos": 0.8, "sesionesConsecutivas": 3}',
-                    ),
-                )
-                plan = cur.fetchone()
+            cur.execute(
+                """
+                INSERT INTO planes_terapeuticos
+                    (nombre, nino_id, terapeuta_id, fecha_inicio, nivel_dificultad_actual,
+                     criterios_progresion, activo, estado_plan, publicado_para_tutor)
+                VALUES (%s, %s, %s, CURRENT_DATE, %s, %s::jsonb, TRUE, 'borrador', FALSE)
+                RETURNING id
+                """,
+                (
+                    f"Plan IA - Sesion {siguiente_sesion} - {nino['nombre']}",
+                    nino_id,
+                    ter["id"],
+                    nivel_dificultad_db,
+                    '{"umbralAciertos": 0.8, "sesionesConsecutivas": 3}',
+                ),
+            )
+            plan = cur.fetchone()
 
             # Actualizar el estado clínico del niño a 'plan_activo' para coherencia global
             cur.execute(
                 """
                 UPDATE ninos
-                SET estado_clinico = 'plan_activo'
+                SET estado_clinico = 'listo_para_plan'
                 WHERE id = %s
                 """,
                 (nino_id,),
@@ -1542,22 +3050,38 @@ def generar_plan_ia(
                     a["nombre"],
                 ),
             )[: min(3, len(catalogo))]
+            ejecucion = _modo_ejecucion_por_tea(nivel_tea_plan)
             for i, act in enumerate(acts, start=1):
                 cur.execute(
                     """
-                    INSERT INTO plan_actividades (plan_id, actividad_id, orden)
-                    VALUES (%s, %s, %s)
+                    INSERT INTO plan_actividades (
+                        plan_id, actividad_id, orden, nivel_dificultad_actual,
+                        modo_ejecucion, requiere_acompanamiento
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s)
                     ON CONFLICT (plan_id, actividad_id) DO NOTHING
                     """,
-                    (plan["id"], act["id"], i),
+                    (
+                        plan["id"],
+                        act["id"],
+                        i,
+                        nivel_dificultad_db,
+                        ejecucion["modo_ejecucion"],
+                        ejecucion["requiere_acompanamiento"],
+                    ),
                 )
 
     return {
-        "mensaje": "Plan regenerado con éxito" if existing else "Plan generado con éxito",
+        "mensaje": f"Sesion {siguiente_sesion} generada con exito",
         "plan_id": str(plan["id"]),
         "nino_id": nino_id,
+        "sesion_numero": siguiente_sesion,
         "dificultad_inicial": dificultad_ia,
         "confianza_ia": confianza,
+        "estado_plan": "borrador",
+        "requiere_revision_terapeuta": True,
+        "perfil_clinico_obligatorio": perfil_obligatorio,
+        "nivel_tea_usado": nivel_tea_plan,
     }
 
 
@@ -1577,7 +3101,9 @@ def obtener_perfil_nino(
                     n.id, n.nombre, n.fecha_nacimiento, n.nivel_cognitivo,
                     n.diagnostico, n.perfil_sensorial, n.objetivos_intervencion,
                     n.estado_clinico, n.documento_diagnostico,
-                    pt.id AS plan_activo_id
+                    n.nivel_tea_validado, n.perfil_validado_at,
+                    pt.id AS plan_activo_id,
+                    pt.estado_plan AS plan_estado
                 FROM ninos n
                 LEFT JOIN planes_terapeuticos pt
                     ON pt.nino_id = n.id AND pt.activo = TRUE
@@ -1590,6 +3116,8 @@ def obtener_perfil_nino(
                 raise HTTPException(status_code=404, detail="Niño no encontrado")
 
     sensorial = nino["perfil_sensorial"] or {}
+    triaje = _triaje_from_perfil(sensorial)
+    scq = triaje.get("scq", {}) if isinstance(triaje.get("scq"), dict) else {}
     return {
         "id": str(nino["id"]),
         "nombre": nino["nombre"],
@@ -1600,9 +3128,25 @@ def obtener_perfil_nino(
         "objetivos_intervencion": nino["objetivos_intervencion"] or [],
         "intereses": sensorial.get("intereses", []),
         "estimulos_aversivos": sensorial.get("estimulosAversivos", {}),
+        "rutinas_regulacion": sensorial.get("rutinas_regulacion", []),
+        "documentos_clinicos": sensorial.get("documentos_clinicos", {}),
+        "medicacion_actual": sensorial.get("medicacion_actual"),
+        "requiere_scq": triaje.get("requiere_scq", False),
+        "scq_completado": triaje.get("scq_completado", False),
+        "scq_autorizado_envio": triaje.get("autorizado_envio_terapeuta", False),
+        "scq_puntaje": scq.get("puntaje_total"),
+        "scq_nivel": scq.get("nivel_indicio"),
+        "tiene_evidencia_clinica": _perfil_tiene_evidencia_clinica(
+            sensorial,
+            nino["diagnostico"],
+        ),
         "documento_diagnostico": nino["documento_diagnostico"],
         "plan_activo_id": str(nino["plan_activo_id"]) if nino["plan_activo_id"] else None,
+        "plan_estado": nino["plan_estado"],
         "estado_clinico": nino["estado_clinico"] or "pendiente_asignacion",
+        "nivel_tea_validado": nino["nivel_tea_validado"],
+        "perfil_validado": nino["perfil_validado_at"] is not None,
+        "perfil_validado_at": nino["perfil_validado_at"].isoformat() if nino["perfil_validado_at"] else None,
     }
 
 
@@ -1705,7 +3249,13 @@ def obtener_asistente_ia(
             # Obtener actividades del plan activo para generar recomendaciones
             cur.execute(
                 """
-                SELECT a.id, a.nombre, a.tipo, a.instrucciones, a.nivel_dificultad, a.duracion_estimada
+                SELECT
+                    a.id,
+                    a.nombre,
+                    a.tipo,
+                    a.instrucciones,
+                    COALESCE(pa.nivel_dificultad_actual, a.nivel_dificultad) AS nivel_dificultad,
+                    a.duracion_estimada
                 FROM plan_actividades pa
                 JOIN actividades a ON a.id = pa.actividad_id
                 JOIN planes_terapeuticos pt ON pt.id = pa.plan_id

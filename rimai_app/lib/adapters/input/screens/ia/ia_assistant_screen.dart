@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:rimai_app/adapters/input/widgets/bento_card.dart';
 import 'package:rimai_app/adapters/input/widgets/rimai_bottom_nav.dart';
 import 'package:rimai_app/adapters/input/widgets/rimai_top_bar.dart';
+import 'package:rimai_app/core/providers/dashboard_providers.dart';
 import 'package:rimai_app/core/providers/pmv2_providers.dart';
 
 class IAAssistantScreen extends ConsumerStatefulWidget {
@@ -17,14 +18,6 @@ class IAAssistantScreen extends ConsumerStatefulWidget {
 }
 
 class _IAAssistantScreenState extends ConsumerState<IAAssistantScreen> {
-  final _observationController = TextEditingController();
-
-  @override
-  void dispose() {
-    _observationController.dispose();
-    super.dispose();
-  }
-
   @override
   Widget build(BuildContext context) {
     final ninoId = widget.ninoId;
@@ -32,10 +25,19 @@ class _IAAssistantScreenState extends ConsumerState<IAAssistantScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFFFF8F2),
       extendBodyBehindAppBar: ninoId != null,
-      appBar: const RimAITopBar(
-        title: 'Asistente IA',
-        leadingIcon: Icons.psychology,
-        iconColor: Color(0xFF4A624D),
+      appBar: RimAITopBar(
+        title: 'Apoyo clinico',
+        leadingIcon: Icons.arrow_back,
+        iconColor: const Color(0xFF4A624D),
+        onLeadingPressed: () {
+          if (context.canPop()) {
+            context.pop();
+          } else if (ninoId != null) {
+            context.go('/terapeuta/nino/$ninoId');
+          } else {
+            context.go('/terapeuta/dashboard');
+          }
+        },
       ),
       bottomNavigationBar: ninoId == null
           ? null
@@ -49,7 +51,7 @@ class _IAAssistantScreenState extends ConsumerState<IAAssistantScreen> {
               items: [
                 BottomNavItem(icon: Icons.home, label: 'Inicio'),
                 BottomNavItem(icon: Icons.assignment, label: 'Plan'),
-                BottomNavItem(icon: Icons.auto_awesome, label: 'IA'),
+                BottomNavItem(icon: Icons.auto_awesome, label: 'Apoyo'),
                 BottomNavItem(icon: Icons.insights, label: 'Progreso'),
               ],
             ),
@@ -58,7 +60,6 @@ class _IAAssistantScreenState extends ConsumerState<IAAssistantScreen> {
               child: Text('Selecciona un paciente desde el dashboard.'))
           : _AssistantContent(
               ninoId: ninoId,
-              observationController: _observationController,
             ),
     );
   }
@@ -66,11 +67,9 @@ class _IAAssistantScreenState extends ConsumerState<IAAssistantScreen> {
 
 class _AssistantContent extends ConsumerWidget {
   final String ninoId;
-  final TextEditingController observationController;
 
   const _AssistantContent({
     required this.ninoId,
-    required this.observationController,
   });
 
   @override
@@ -91,7 +90,7 @@ class _AssistantContent extends ConsumerWidget {
         error: (error, _) => BentoCard(
           backgroundColor: const Color(0xFFFAF2E9),
           child: Text(
-            'No se pudo cargar el asistente IA: $error',
+            'No se pudo cargar el apoyo clinico: $error',
             style: const TextStyle(color: Color(0xFF58423B)),
           ),
         ),
@@ -106,9 +105,9 @@ class _AssistantContent extends ConsumerWidget {
               ),
             ),
             const SizedBox(height: 8),
-            const Text(
-              'Asistente IA',
-              style: TextStyle(
+            Text(
+              'Apoyo clinico de ${data.ninoNombre}',
+              style: const TextStyle(
                 fontSize: 32,
                 fontWeight: FontWeight.w800,
                 color: Color(0xFF1E1B16),
@@ -117,11 +116,7 @@ class _AssistantContent extends ConsumerWidget {
             const SizedBox(height: 24),
             _AnalysisCard(data: data),
             const SizedBox(height: 24),
-            _RecommendationsCard(
-              ninoId: ninoId,
-              recomendaciones: data.recomendaciones,
-              observationController: observationController,
-            ),
+            _SessionReviewCard(ninoId: ninoId),
             const SizedBox(height: 24),
             _SessionPlanCard(planSesion: data.planSesion),
           ],
@@ -144,8 +139,13 @@ class _AnalysisCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'Analisis cognitivo',
+            'Analisis del paciente',
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'Estimacion basada en el plan vigente y los resultados recientes registrados para este paciente.',
+            style: TextStyle(color: Color(0xFF58423B), height: 1.35),
           ),
           const SizedBox(height: 16),
           LinearProgressIndicator(
@@ -165,109 +165,223 @@ class _AnalysisCard extends StatelessWidget {
   }
 }
 
-class _RecommendationsCard extends ConsumerWidget {
+class _SessionReviewCard extends ConsumerStatefulWidget {
   final String ninoId;
-  final List<RecomendacionClinica> recomendaciones;
-  final TextEditingController observationController;
 
-  const _RecommendationsCard({
-    required this.ninoId,
-    required this.recomendaciones,
-    required this.observationController,
-  });
+  const _SessionReviewCard({required this.ninoId});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_SessionReviewCard> createState() => _SessionReviewCardState();
+}
+
+class _SessionReviewCardState extends ConsumerState<_SessionReviewCard> {
+  final Set<String> _resolving = {};
+
+  @override
+  Widget build(BuildContext context) {
+    final sesionesAsync = ref.watch(sesionesRevisionProvider(widget.ninoId));
+
     return BentoCard(
       backgroundColor: Colors.white,
+      child: sesionesAsync.when(
+        loading: () => const Center(
+          child: CircularProgressIndicator(color: Color(0xFF4A624D)),
+        ),
+        error: (error, _) => Text(
+          'No se pudieron cargar las sesiones por revisar: $error',
+          style: const TextStyle(color: Color(0xFF58423B)),
+        ),
+        data: (sesiones) => Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Recomendaciones para revisar',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Cada bloque corresponde a una sesion completada por la familia. Revisa el resultado de cada actividad y aprueba solo los ajustes solicitados que correspondan.',
+              style: TextStyle(color: Color(0xFF58423B), height: 1.35),
+            ),
+            const SizedBox(height: 16),
+            if (sesiones.isEmpty)
+              const Text(
+                'Aun no hay sesiones completadas para revisar.',
+                style: TextStyle(color: Color(0xFF58423B), height: 1.35),
+              ),
+            ...sesiones.map(_buildSessionBlock),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSessionBlock(SesionRevisionData sesion) {
+    final pct = (sesion.tasaAciertos * 100).round();
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFAF2E9),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE9E1D8)),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Recomendaciones',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 16),
-          if (recomendaciones.isEmpty)
-            const Text(
-                'No hay recomendaciones disponibles para este paciente.'),
-          ...recomendaciones.map(
-            (rec) => Padding(
-              padding: const EdgeInsets.only(bottom: 16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    rec.actividad,
-                    style: const TextStyle(fontWeight: FontWeight.bold),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Sesion ${sesion.sesionNumero}',
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF1E1B16),
                   ),
-                  const SizedBox(height: 4),
-                  Text(rec.justificacion),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Text('Confianza ${(rec.confianza * 100).round()}%'),
-                      const Spacer(),
-                      TextButton(
-                        onPressed: () => _registrarDecision(
-                          context,
-                          ref,
-                          rec.id,
-                          'RECHAZADA',
-                        ),
-                        child: const Text('Rechazar'),
-                      ),
-                      const SizedBox(width: 8),
-                      ElevatedButton(
-                        onPressed: () => _registrarDecision(
-                          context,
-                          ref,
-                          rec.id,
-                          'ACEPTADA',
-                        ),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF4A624D),
-                          foregroundColor: Colors.white,
-                        ),
-                        child: const Text('Aceptar'),
-                      ),
-                    ],
-                  ),
-                ],
+                ),
               ),
-            ),
+              Text(
+                '$pct% aciertos',
+                style: const TextStyle(
+                  color: Color(0xFF4A624D),
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 8),
-          TextField(
-            controller: observationController,
-            minLines: 3,
-            maxLines: null,
-            decoration: const InputDecoration(
-              border: OutlineInputBorder(),
-              hintText: 'Observaciones clinicas',
-            ),
-          ),
+          const SizedBox(height: 12),
+          ...sesion.actividades.map(_buildActivityReview),
         ],
       ),
     );
   }
 
-  Future<void> _registrarDecision(
-    BuildContext context,
-    WidgetRef ref,
-    String recomendacionId,
-    String accion,
-  ) async {
-    await ref.read(registrarDecisionProvider).ejecutar(
-          recomendacionId,
-          accion,
-          observationController.text,
-          ninoId: ninoId,
-        );
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Decision $accion registrada.')),
+  Widget _buildActivityReview(ActividadRevisionSesion actividad) {
+    final solicitud = actividad.solicitudAjuste;
+    final pct = (actividad.tasaAciertos * 100).round();
+    final ayuda = switch (actividad.nivelAyudaRequerido) {
+      1 => 'Verbal',
+      2 => 'Fisica',
+      _ => 'Ninguna',
+    };
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            actividad.actividadNombre,
+            style: const TextStyle(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            '${actividad.aciertos}/${actividad.intentos} aciertos ($pct%) · Dificultad usada: ${actividad.nivelDificultadUsado} · Ayuda: $ayuda',
+            style: const TextStyle(color: Color(0xFF58423B), height: 1.3),
+          ),
+          if (actividad.observaciones?.trim().isNotEmpty == true) ...[
+            const SizedBox(height: 6),
+            Text(
+              actividad.observaciones!,
+              style: const TextStyle(color: Color(0xFF58423B), height: 1.3),
+            ),
+          ],
+          if (solicitud != null) ...[
+            const SizedBox(height: 12),
+            _buildSolicitud(solicitud),
+          ],
+        ],
+      ),
     );
+  }
+
+  Widget _buildSolicitud(SolicitudAjusteData solicitud) {
+    final pending = solicitud.estado == 'pendiente';
+    final accion = solicitud.accion == 'reducir' ? 'reducir' : 'aumentar';
+    final resolving = _resolving.contains(solicitud.id);
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: pending ? const Color(0xFFFFF2CC) : const Color(0xFFE8F5E9),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            pending
+                ? 'Solicitud para $accion dificultad'
+                : 'Solicitud ${solicitud.estado}',
+            style: const TextStyle(
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF1E1B16),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '${solicitud.dificultadActual} -> ${solicitud.dificultadSugerida}',
+            style: const TextStyle(color: Color(0xFF58423B)),
+          ),
+          if (pending) ...[
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed:
+                        resolving ? null : () => _resolver(solicitud, false),
+                    child: const Text('Rechazar'),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed:
+                        resolving ? null : () => _resolver(solicitud, true),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF4A624D),
+                      foregroundColor: Colors.white,
+                    ),
+                    child: Text(resolving ? 'Guardando...' : 'Aprobar'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Future<void> _resolver(SolicitudAjusteData solicitud, bool aceptar) async {
+    setState(() => _resolving.add(solicitud.id));
+    try {
+      await ref.read(iaServiceProvider).resolverSolicitudAjuste(
+            solicitud.id,
+            aceptar: aceptar,
+          );
+      ref.invalidate(sesionesRevisionProvider(widget.ninoId));
+      ref.invalidate(planActivoProvider(widget.ninoId));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+              aceptar ? 'Ajuste aprobado y aplicado.' : 'Solicitud rechazada.'),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo resolver la solicitud: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _resolving.remove(solicitud.id));
+    }
   }
 }
 
@@ -284,12 +398,15 @@ class _SessionPlanCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'Plan de sesion',
+            'Pasos sugeridos para la sesion',
             style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 16),
           if (planSesion.isEmpty)
-            const Text('No hay pasos sugeridos para la sesion.'),
+            const Text(
+              'No hay pasos sugeridos porque el paciente aun no tiene actividades listas en su plan.',
+              style: TextStyle(color: Color(0xFF58423B), height: 1.35),
+            ),
           ...planSesion.map(
             (step) => ListTile(
               contentPadding: EdgeInsets.zero,

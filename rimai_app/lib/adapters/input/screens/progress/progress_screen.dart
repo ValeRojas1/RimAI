@@ -30,8 +30,15 @@ class _ProgressScreenState extends ConsumerState<ProgressScreen> {
       extendBodyBehindAppBar: true,
       appBar: RimAITopBar(
         title: "Progreso Clínico",
-        leadingIcon: Icons.insights,
+        leadingIcon: Icons.arrow_back,
         iconColor: const Color(0xFF4A624D),
+        onLeadingPressed: () {
+          if (context.canPop()) {
+            context.pop();
+          } else {
+            context.go('/terapeuta/nino/${widget.ninoId}');
+          }
+        },
         trailingWidget: const CircleAvatar(
           radius: 20,
           backgroundColor: Color(0xFFFAF2E9),
@@ -42,13 +49,13 @@ class _ProgressScreenState extends ConsumerState<ProgressScreen> {
         currentIndex: 3, // Progreso
         onTap: (index) {
           if (index == 0) context.go('/terapeuta/dashboard');
-          if (index == 1) context.go('/terapeuta/sesion');
-          if (index == 2) context.go('/terapeuta/ia');
+          if (index == 1) context.go('/terapeuta/plan/${widget.ninoId}');
+          if (index == 2) context.go('/terapeuta/ia/${widget.ninoId}');
         },
         items: [
           BottomNavItem(icon: Icons.home, label: "Inicio"),
-          BottomNavItem(icon: Icons.spatial_audio_off, label: "Sesión"),
-          BottomNavItem(icon: Icons.auto_awesome, label: "IA"),
+          BottomNavItem(icon: Icons.spatial_audio_off, label: "Plan"),
+          BottomNavItem(icon: Icons.auto_awesome, label: "Apoyo"),
           BottomNavItem(icon: Icons.insights, label: "Progreso"),
         ],
       ),
@@ -122,8 +129,9 @@ class _ProgressScreenState extends ConsumerState<ProgressScreen> {
                 );
               }).toList(),
               onChanged: (newValue) {
-                if (newValue != null)
+                if (newValue != null) {
                   setState(() => _selectedPeriod = newValue);
+                }
               },
             ),
           ),
@@ -235,10 +243,10 @@ class _ProgressScreenState extends ConsumerState<ProgressScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                Expanded(
+                const Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    children: const [
+                    children: [
                       Text("EVOLUCIÓN CLÍNICA",
                           style: TextStyle(
                               fontSize: 11,
@@ -272,8 +280,9 @@ class _ProgressScreenState extends ConsumerState<ProgressScreen> {
                                 Text(value, overflow: TextOverflow.ellipsis));
                       }).toList(),
                       onChanged: (newValue) {
-                        if (newValue != null)
+                        if (newValue != null) {
                           setState(() => _selectedSkill = newValue);
+                        }
                       },
                     ),
                   ),
@@ -289,14 +298,14 @@ class _ProgressScreenState extends ConsumerState<ProgressScreen> {
                     show: true,
                     drawVerticalLine: false,
                     getDrawingHorizontalLine: (value) => FlLine(
-                        color: const Color(0xFFDFC0B7).withOpacity(0.5),
+                        color: const Color(0xFFDFC0B7).withValues(alpha: 0.5),
                         strokeWidth: 1),
                   ),
                   titlesData: FlTitlesData(
-                    rightTitles:
-                        AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                    topTitles:
-                        AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                    rightTitles: const AxisTitles(
+                        sideTitles: SideTitles(showTitles: false)),
+                    topTitles: const AxisTitles(
+                        sideTitles: SideTitles(showTitles: false)),
                     bottomTitles: AxisTitles(
                       sideTitles: SideTitles(
                         showTitles: true,
@@ -322,10 +331,10 @@ class _ProgressScreenState extends ConsumerState<ProgressScreen> {
                       isCurved: true,
                       color: const Color(0xFF4A624D),
                       barWidth: 4,
-                      dotData: FlDotData(show: true),
+                      dotData: const FlDotData(show: true),
                       belowBarData: BarAreaData(
                         show: true,
-                        color: const Color(0xFFB8D6B2).withOpacity(0.3),
+                        color: const Color(0xFFB8D6B2).withValues(alpha: 0.3),
                       ),
                     ),
                   ],

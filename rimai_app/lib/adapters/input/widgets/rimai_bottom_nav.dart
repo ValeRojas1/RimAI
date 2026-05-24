@@ -36,10 +36,10 @@ class RimAIBottomNav extends StatelessWidget {
           child: Container(
             height: 96,
             decoration: BoxDecoration(
-              color: const Color(0xFFFFF8F2).withOpacity(0.8),
+              color: const Color(0xFFFFF8F2).withValues(alpha: 0.8),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
+                  color: Colors.black.withValues(alpha: 0.05),
                   blurRadius: 10,
                   offset: const Offset(0, -4),
                 )
@@ -73,7 +73,7 @@ class RimAIBottomNav extends StatelessWidget {
                           item.icon,
                           color: isActive
                               ? const Color(0xFF1E1B16)
-                              : const Color(0xFF58423B).withOpacity(0.5),
+                              : const Color(0xFF58423B).withValues(alpha: 0.5),
                         ),
                         if (isActive)
                           Padding(

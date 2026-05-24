@@ -229,7 +229,7 @@ class _ActivitiesCatalogScreenState
       decoration: BoxDecoration(
         color: _kSurface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: _kBorder.withOpacity(0.6)),
+        border: Border.all(color: _kBorder.withValues(alpha: 0.6)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -249,7 +249,7 @@ class _ActivitiesCatalogScreenState
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<String>(
-            value: _categoria,
+            initialValue: _categoria,
             items: const [
               'Regulacion sensorial',
               'Atencion conjunta',
@@ -266,7 +266,7 @@ class _ActivitiesCatalogScreenState
             children: [
               Expanded(
                 child: DropdownButtonFormField<String>(
-                  value: _dificultad,
+                  initialValue: _dificultad,
                   items: const ['Bajo', 'Medio', 'Alto']
                       .map((v) => DropdownMenuItem(value: v, child: Text(v)))
                       .toList(),
@@ -301,16 +301,25 @@ class _ActivitiesCatalogScreenState
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<String?>(
-            value: _planId,
+            initialValue: _planId,
+            isExpanded: true,
             items: [
               const DropdownMenuItem<String?>(
                 value: null,
-                child: Text('Solo guardar en catalogo'),
+                child: Text(
+                  'Solo guardar en catalogo',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
               ...planes.map(
                 (p) => DropdownMenuItem<String?>(
                   value: p.planActivoId,
-                  child: Text('${p.nombre} - ${p.planActivo}'),
+                  child: Text(
+                    '${p.nombre} - ${p.planActivo}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
               ),
             ],
@@ -354,7 +363,7 @@ class _ActivitiesCatalogScreenState
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: _kBorder.withOpacity(0.55)),
+        border: Border.all(color: _kBorder.withValues(alpha: 0.55)),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(

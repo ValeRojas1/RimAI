@@ -163,7 +163,7 @@ INSERT INTO ninos (
     'cccccccc-0000-0000-0000-000000000004',
     'Diego Vega',
     '2017-11-05',
-    'Alto',
+    'Medio',
     '{"hitos": {"comunicacion": "Fluido", "contacto_visual": "Sostenido"},
       "sensorial": {"hipersensibilidad": [], "hiposensibilidad": ["Presión profunda"]},
       "intereses": ["Dinosaurios", "Geometría"]}',
@@ -190,10 +190,16 @@ INSERT INTO planes_terapeuticos (
     'cccccccc-0000-0000-0000-000000000004',
     '22222222-0000-0000-0000-000000000001',
     CURRENT_DATE - INTERVAL '28 days',
-    'Alto',
+    'Medio',
     TRUE
 )
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (id) DO UPDATE SET
+    nombre = EXCLUDED.nombre,
+    nino_id = EXCLUDED.nino_id,
+    terapeuta_id = EXCLUDED.terapeuta_id,
+    fecha_inicio = EXCLUDED.fecha_inicio,
+    nivel_dificultad_actual = EXCLUDED.nivel_dificultad_actual,
+    activo = TRUE;
 
 INSERT INTO plan_actividades (plan_id, actividad_id, orden)
 VALUES
@@ -201,6 +207,43 @@ VALUES
     ('dddddddd-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000004', 2),
     ('dddddddd-0000-0000-0000-000000000001', 'aaaaaaaa-0000-0000-0000-000000000005', 3)
 ON CONFLICT DO NOTHING;
+
+-- Sesion previa para demostrar HU-08: ajuste automatico de dificultad.
+-- Al ejecutar de nuevo "Contacto visual 5 seg" con desempeno >= 80%,
+-- el sistema tendra historial y registrara el aumento de Medio a Alto.
+INSERT INTO sesiones (
+    id, nino_id, plan_id, fecha_inicio, fecha_fin, estado, sync_at
+) VALUES (
+    'eeeeeeee-0000-0000-0000-000000000001',
+    'cccccccc-0000-0000-0000-000000000004',
+    'dddddddd-0000-0000-0000-000000000001',
+    NOW() - INTERVAL '1 day',
+    NOW() - INTERVAL '1 day' + INTERVAL '12 minutes',
+    'completada',
+    NOW() - INTERVAL '1 day' + INTERVAL '13 minutes'
+)
+ON CONFLICT (id) DO UPDATE SET
+    fecha_inicio = EXCLUDED.fecha_inicio,
+    fecha_fin = EXCLUDED.fecha_fin,
+    estado = EXCLUDED.estado,
+    sync_at = EXCLUDED.sync_at;
+
+DELETE FROM resultados_actividad
+WHERE sesion_id = 'eeeeeeee-0000-0000-0000-000000000001';
+
+INSERT INTO resultados_actividad (
+    sesion_id, actividad_id, tiempo_respuesta, aciertos, repeticiones,
+    nivel_ayuda_requerido, nivel_dificultad_usado, observaciones
+) VALUES (
+    'eeeeeeee-0000-0000-0000-000000000001',
+    'aaaaaaaa-0000-0000-0000-000000000003',
+    2.1,
+    8,
+    10,
+    0,
+    'Medio',
+    'Sesion previa demo HU-08: desempeno suficiente para evaluar progresion.'
+);
 
 -- ── 5. Trazabilidad de ejemplo ──────────────────────────────────────────────
 

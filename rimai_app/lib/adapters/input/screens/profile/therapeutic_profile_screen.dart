@@ -1,18 +1,27 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:file_picker/file_picker.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'package:rimai_app/adapters/input/widgets/rimai_top_bar.dart';
 import 'package:rimai_app/adapters/input/widgets/bento_card.dart';
 import 'package:rimai_app/adapters/input/widgets/tag_chip.dart';
 import 'package:rimai_app/adapters/input/widgets/interest_card.dart';
+import 'package:rimai_app/core/constants/api_constants.dart';
 import 'package:rimai_app/core/providers/pmv2_providers.dart';
 import 'package:rimai_app/core/providers/dashboard_providers.dart';
 
 class TherapeuticProfileScreen extends ConsumerStatefulWidget {
   final String ninoId;
-  const TherapeuticProfileScreen({super.key, required this.ninoId});
+  final bool editMode;
+  const TherapeuticProfileScreen({
+    super.key,
+    required this.ninoId,
+    this.editMode = false,
+  });
 
   @override
   ConsumerState<TherapeuticProfileScreen> createState() =>
@@ -23,20 +32,25 @@ class _TherapeuticProfileScreenState
     extends ConsumerState<TherapeuticProfileScreen> {
   final _nameController = TextEditingController();
   final _ageController = TextEditingController();
+  final _objectivesController = TextEditingController();
+  final _clinicalNotesController = TextEditingController();
   List<String> _selectedInterests = [];
   Map<String, List<String>> _aversiveStimuli = {
     'RUIDO': [],
     'COLORES': [],
     'LUGARES': []
   };
-  String? _uploadedFileName;
   bool _dataInitialized = false;
   bool _isGeneratingPlan = false;
+  bool _isSavingValidation = false;
+  int _nivelTea = 1;
 
   @override
   void dispose() {
     _nameController.dispose();
     _ageController.dispose();
+    _objectivesController.dispose();
+    _clinicalNotesController.dispose();
     super.dispose();
   }
 
@@ -49,23 +63,6 @@ class _TherapeuticProfileScreenState
         // Guardar cambios vía el provider si es necesario.
       }
     });
-  }
-
-  Future<void> _pickFile() async {
-    FilePickerResult? result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['pdf', 'jpg', 'png'],
-    );
-
-    if (result != null && result.files.single.path != null) {
-      // Simular subida
-      final fileName = await ref
-          .read(perfilServiceProvider)
-          .cargarDiagnostico(result.files.single.path);
-      setState(() {
-        _uploadedFileName = fileName;
-      });
-    }
   }
 
   @override
@@ -93,9 +90,16 @@ class _TherapeuticProfileScreenState
             _selectedInterests = List.from(perfil.intereses);
             _aversiveStimuli = perfil.estimulosAversivos
                 .map((key, value) => MapEntry(key, List<String>.from(value)));
+            _nivelTea = perfil.nivelTeaValidado ??
+                _nivelTeaFromDiagnosis(perfil.diagnostico);
+            _objectivesController.text = perfil.objetivosIntervencion.isEmpty
+                ? 'Mejorar comunicacion funcional\nIncrementar tolerancia a rutinas guiadas\nFortalecer autonomia en actividades diarias'
+                : perfil.objetivosIntervencion.join('\n');
             _dataInitialized = true;
           }
 
+          final hasPlan = perfil.planActivoId != null;
+          final showActionsOnly = hasPlan && !widget.editMode;
           return SingleChildScrollView(
             child: Padding(
               padding: EdgeInsets.only(
@@ -106,15 +110,27 @@ class _TherapeuticProfileScreenState
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildHeader(),
-                  const SizedBox(height: 32),
-                  _buildBentoGrid(),
-                  const SizedBox(height: 32),
-                  _buildEstadoBadge(perfil.estadoClinico),
-                  const SizedBox(height: 24),
-                  _buildQuickNav(perfil),
-                ],
+                children: showActionsOnly
+                    ? [
+                        _buildActionsHeader(perfil),
+                        const SizedBox(height: 20),
+                        _buildEstadoBadge(perfil.estadoClinico),
+                        const SizedBox(height: 24),
+                        _buildQuickNav(perfil, compact: true),
+                      ]
+                    : [
+                        _buildHeader(),
+                        const SizedBox(height: 32),
+                        _buildBentoGrid(),
+                        const SizedBox(height: 32),
+                        _buildEstadoBadge(perfil.estadoClinico),
+                        const SizedBox(height: 24),
+                        _buildFamilyDataCard(perfil),
+                        const SizedBox(height: 24),
+                        _buildClinicalValidationCard(perfil),
+                        const SizedBox(height: 24),
+                        _buildQuickNav(perfil),
+                      ],
               ),
             ),
           );
@@ -147,7 +163,32 @@ class _TherapeuticProfileScreenState
           "Documentación detallada para el plan de intervención personalizado.",
           style: TextStyle(
             fontSize: 16,
-            color: const Color(0xFF58423B).withOpacity(0.8),
+            color: const Color(0xFF58423B).withValues(alpha: 0.8),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildActionsHeader(PacientePerfil perfil) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          perfil.nombre,
+          style: const TextStyle(
+            fontSize: 32,
+            fontWeight: FontWeight.w800,
+            color: Color(0xFF1E1B16),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Plan activo listo. Accede a las acciones principales sin revisar todo el perfil clinico.',
+          style: TextStyle(
+            fontSize: 16,
+            color: const Color(0xFF58423B).withValues(alpha: 0.8),
+            height: 1.35,
           ),
         ),
       ],
@@ -165,8 +206,6 @@ class _TherapeuticProfileScreenState
                 child: Column(
                   children: [
                     _buildPatientInfoCard(),
-                    const SizedBox(height: 24),
-                    _buildUploadDiagnosisCard(),
                   ],
                 ),
               ),
@@ -190,13 +229,18 @@ class _TherapeuticProfileScreenState
               _buildInterestsCard(),
               const SizedBox(height: 24),
               _buildAversiveStimuliCard(),
-              const SizedBox(height: 24),
-              _buildUploadDiagnosisCard(),
             ],
           );
         }
       },
     );
+  }
+
+  int _nivelTeaFromDiagnosis(String? diagnostico) {
+    final text = (diagnostico ?? '').toLowerCase();
+    if (text.contains('nivel 3') || text.contains('nivel iii')) return 3;
+    if (text.contains('nivel 2') || text.contains('nivel ii')) return 2;
+    return 1;
   }
 
   Widget _buildPatientInfoCard() {
@@ -205,11 +249,11 @@ class _TherapeuticProfileScreenState
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
+          const Row(
             children: [
-              const Icon(Icons.badge, color: Color(0xFFB8D6B2)),
-              const SizedBox(width: 8),
-              const Text(
+              Icon(Icons.badge, color: Color(0xFFB8D6B2)),
+              SizedBox(width: 8),
+              Text(
                 "Información del Paciente",
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
@@ -288,7 +332,7 @@ class _TherapeuticProfileScreenState
           style: TextStyle(
             fontSize: 11,
             fontWeight: FontWeight.bold,
-            color: const Color(0xFF58423B).withOpacity(0.6),
+            color: const Color(0xFF58423B).withValues(alpha: 0.6),
           ),
         ),
         const SizedBox(height: 8),
@@ -320,12 +364,12 @@ class _TherapeuticProfileScreenState
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Expanded(
+              const Expanded(
                 child: Row(
                   children: [
-                    const Icon(Icons.star_border, color: Color(0xFFB8D6B2)),
-                    const SizedBox(width: 8),
-                    const Expanded(
+                    Icon(Icons.star_border, color: Color(0xFFB8D6B2)),
+                    SizedBox(width: 8),
+                    Expanded(
                       child: Text(
                         "Intereses y Preferencias",
                         overflow: TextOverflow.ellipsis,
@@ -474,14 +518,15 @@ class _TherapeuticProfileScreenState
   Widget _buildSubSectionLabel(String text, IconData icon) {
     return Row(
       children: [
-        Icon(icon, size: 18, color: const Color(0xFF58423B).withOpacity(0.6)),
+        Icon(icon,
+            size: 18, color: const Color(0xFF58423B).withValues(alpha: 0.6)),
         const SizedBox(width: 6),
         Text(
           text,
           style: TextStyle(
             fontSize: 11,
             fontWeight: FontWeight.bold,
-            color: const Color(0xFF58423B).withOpacity(0.6),
+            color: const Color(0xFF58423B).withValues(alpha: 0.6),
           ),
         ),
       ],
@@ -494,11 +539,11 @@ class _TherapeuticProfileScreenState
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
+          const Row(
             children: [
-              const Icon(Icons.warning, color: Color(0xFFA43714)),
-              const SizedBox(width: 8),
-              const Text(
+              Icon(Icons.warning, color: Color(0xFFA43714)),
+              SizedBox(width: 8),
+              Text(
                 "Estímulos Aversivos",
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
@@ -531,7 +576,7 @@ class _TherapeuticProfileScreenState
           style: TextStyle(
             fontSize: 11,
             fontWeight: FontWeight.bold,
-            color: const Color(0xFF58423B).withOpacity(0.6),
+            color: const Color(0xFF58423B).withValues(alpha: 0.6),
           ),
         ),
         const SizedBox(height: 12),
@@ -552,100 +597,337 @@ class _TherapeuticProfileScreenState
     );
   }
 
-  Widget _buildUploadDiagnosisCard() {
+  Widget _buildFamilyDataCard(PacientePerfil perfil) {
+    final docs = perfil.documentosClinicos.entries.toList();
     return BentoCard(
-      backgroundColor: const Color(0xFFB8D6B2).withOpacity(0.1),
-      border:
-          Border.all(color: const Color(0xFFB8D6B2).withOpacity(0.3), width: 2),
+      backgroundColor: Colors.white,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Informacion registrada por la familia',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF1E1B16),
+            ),
+          ),
+          const SizedBox(height: 14),
+          _dataSection(
+            'Rutinas de regulacion',
+            perfil.rutinasRegulacion.isEmpty
+                ? ['Sin rutinas registradas']
+                : perfil.rutinasRegulacion,
+          ),
+          const SizedBox(height: 14),
+          _documentsSection(docs),
+          const SizedBox(height: 14),
+          _dataSection(
+            'Medicacion actual',
+            (perfil.medicacionActual == null ||
+                    perfil.medicacionActual!.isEmpty)
+                ? ['Sin medicacion registrada']
+                : perfil.medicacionActual!
+                    .split(RegExp(r'[\n;]'))
+                    .map((e) => e.trim())
+                    .where((e) => e.isNotEmpty)
+                    .toList(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _documentLabel(dynamic value) {
+    if (value is Map) {
+      return value['nombre']?.toString() ?? value.toString();
+    }
+    return value?.toString() ?? 'archivo';
+  }
+
+  String? _documentUrl(dynamic value) {
+    if (value is Map) {
+      final raw = value['url'] ?? value['download_url'] ?? value['path'];
+      final url = raw?.toString();
+      return url == null || url.isEmpty ? null : url;
+    }
+    final raw = value?.toString();
+    if (raw == null || raw.isEmpty) return null;
+    return raw;
+  }
+
+  String _absoluteDocumentUrl(String url) {
+    if (url.startsWith('http://') || url.startsWith('https://')) return url;
+    final base = ApiConstants.baseUrl.replaceAll(RegExp(r'/$'), '');
+    final path = url.startsWith('/') ? url : '/$url';
+    return '$base$path';
+  }
+
+  String _safeFileName(String label, String url) {
+    final uriName = Uri.tryParse(url)?.pathSegments.last;
+    final raw = (uriName?.isNotEmpty == true ? uriName : label)
+        ?.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_')
+        .replaceAll(' ', '_');
+    return raw == null || raw.isEmpty ? 'documento_clinico' : raw;
+  }
+
+  String _documentType(String key) => switch (key) {
+        'evaluacion_profesional' => 'Evaluacion profesional',
+        'plan_terapeutico_previo' => 'Plan terapeutico previo',
+        'medicacion' => 'Documento de medicacion',
+        _ => key.replaceAll('_', ' '),
+      };
+
+  Future<void> _openDocument(String url, String label) async {
+    final absoluteUrl = _absoluteDocumentUrl(url);
+    final uri = Uri.tryParse(absoluteUrl);
+    if (uri == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('El enlace del documento no es valido.')),
+      );
+      return;
+    }
+    try {
+      final filename = _safeFileName(label, absoluteUrl);
+      final target = File(
+          '${Directory.systemTemp.path}${Platform.pathSeparator}$filename');
+      await ref.read(dioProvider).download(absoluteUrl, target.path);
+      final opened = await launchUrl(
+        Uri.file(target.path),
+        mode: LaunchMode.externalApplication,
+      );
+      if (!opened && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No se pudo abrir el documento.')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo descargar el documento: $e')),
+      );
+    }
+  }
+
+  Widget _documentsSection(List<MapEntry<String, dynamic>> docs) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'DOCUMENTOS ENVIADOS',
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.bold,
+            color: Color(0xFF58423B),
+          ),
+        ),
+        const SizedBox(height: 8),
+        if (docs.isEmpty)
+          const Text(
+            'Sin documentos adjuntos',
+            style: TextStyle(color: Color(0xFF58423B)),
+          )
+        else
+          ...docs.map((entry) {
+            final label = _documentLabel(entry.value);
+            final url = _documentUrl(entry.value);
+            return Container(
+              margin: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFAF2E9),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFDFC0B7)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.picture_as_pdf_outlined,
+                      color: Color(0xFFA43714)),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _documentType(entry.key),
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Color(0xFF58423B),
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          label,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: Color(0xFF1E1B16),
+                          ),
+                        ),
+                        if (url == null)
+                          const Padding(
+                            padding: EdgeInsets.only(top: 4),
+                            child: Text(
+                              'Archivo registrado sin enlace disponible.',
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Color(0xFF8B716A),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton.filledTonal(
+                    tooltip: 'Abrir documento',
+                    onPressed:
+                        url == null ? null : () => _openDocument(url, label),
+                    icon: const Icon(Icons.open_in_new, size: 18),
+                  ),
+                ],
+              ),
+            );
+          }),
+      ],
+    );
+  }
+
+  Widget _dataSection(String title, List<String> rows) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title.toUpperCase(),
+          style: const TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.bold,
+            color: Color(0xFF58423B),
+          ),
+        ),
+        const SizedBox(height: 8),
+        ...rows.map(
+          (row) => Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.check_circle_outline,
+                    size: 16, color: Color(0xFF4A624D)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    row,
+                    style: const TextStyle(
+                      color: Color(0xFF58423B),
+                      height: 1.3,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildClinicalValidationCard(PacientePerfil perfil) {
+    final obligatoria = perfil.requiereScq && !perfil.tieneEvidenciaClinica;
+    return BentoCard(
+      backgroundColor: const Color(0xFFFAF2E9),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Icon(Icons.upload_file, color: Color(0xFF4A624D)),
+              const Icon(Icons.verified_outlined, color: Color(0xFF4A624D)),
               const SizedBox(width: 8),
-              const Text(
-                "Cargar Diagnóstico",
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 18,
-                  color: Color(0xFF1E1B16),
+              Expanded(
+                child: Text(
+                  perfil.perfilValidado
+                      ? 'Perfil validado por terapeuta'
+                      : obligatoria
+                          ? 'Validacion clinica obligatoria'
+                          : 'Validacion clinica opcional',
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF1E1B16),
+                  ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 14),
           Text(
-            "Adjunta archivos de diagnóstico médico o historial previo.",
-            style: TextStyle(
-              fontSize: 14,
-              color: const Color(0xFF58423B).withOpacity(0.7),
-            ),
+            obligatoria
+                ? 'Este caso viene de SCQ sin evidencia clinica previa. Confirma el nivel TEA y los objetivos antes de generar el plan.'
+                : 'La familia adjunto evidencia clinica o datos suficientes. Puedes confirmar o ajustar estos objetivos antes de generar el plan.',
+            style: const TextStyle(color: Color(0xFF58423B), height: 1.4),
           ),
-          const SizedBox(height: 24),
-          if (_uploadedFileName != null)
-            Row(
-              children: [
-                const Icon(Icons.description, color: Color(0xFFB8D6B2)),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        _uploadedFileName!,
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const Text("Subido hoy",
-                          style: TextStyle(fontSize: 12, color: Colors.grey)),
-                    ],
-                  ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.close, color: Colors.grey),
-                  onPressed: () => setState(() => _uploadedFileName = null),
-                )
-              ],
-            )
-          else
-            InkWell(
-              onTap: _pickFile,
-              borderRadius: BorderRadius.circular(12),
-              child: Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(vertical: 32),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(12),
-                  // Dashed effect can be simulated or handled with a package, standard border for now
-                  border: Border.all(
-                      color: const Color(0xFFB8D6B2), style: BorderStyle.solid),
-                  color: Colors.white.withOpacity(0.5),
-                ),
-                child: Column(
-                  children: [
-                    const Icon(Icons.cloud_upload,
-                        size: 36, color: Color(0xFFB8D6B2)),
-                    const SizedBox(height: 12),
-                    const Text(
-                      "Seleccionar archivo",
-                      style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFF4A624D)),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      "PDF, JPG o PNG (Max 10MB)",
-                      style: TextStyle(
-                          fontSize: 11,
-                          color: const Color(0xFF58423B).withOpacity(0.5)),
-                    ),
-                  ],
+          const SizedBox(height: 16),
+          DropdownButtonFormField<int>(
+            initialValue: _nivelTea,
+            decoration: _inputDecoration('Nivel TEA validado'),
+            items: const [
+              DropdownMenuItem(value: 1, child: Text('Nivel 1')),
+              DropdownMenuItem(value: 2, child: Text('Nivel 2')),
+              DropdownMenuItem(value: 3, child: Text('Nivel 3')),
+            ],
+            onChanged: (value) {
+              if (value != null) setState(() => _nivelTea = value);
+            },
+          ),
+          const SizedBox(height: 14),
+          TextField(
+            controller: _objectivesController,
+            minLines: 3,
+            maxLines: 5,
+            decoration: _inputDecoration('Objetivos terapeuticos'),
+          ),
+          const SizedBox(height: 14),
+          TextField(
+            controller: _clinicalNotesController,
+            minLines: 2,
+            maxLines: 4,
+            decoration: _inputDecoration('Observaciones del terapeuta'),
+          ),
+          const SizedBox(height: 18),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: _isSavingValidation
+                  ? null
+                  : () => _guardarValidacionClinica(perfil),
+              icon: const Icon(Icons.save_outlined),
+              label: Text(_isSavingValidation
+                  ? 'Guardando...'
+                  : 'Guardar validacion clinica'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF4A624D),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
                 ),
               ),
-            )
+            ),
+          ),
         ],
+      ),
+    );
+  }
+
+  InputDecoration _inputDecoration(String label) {
+    return InputDecoration(
+      labelText: label,
+      filled: true,
+      fillColor: Colors.white,
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide.none,
       ),
     );
   }
@@ -657,40 +939,49 @@ class _TherapeuticProfileScreenState
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
+        color: color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(100),
-        border: Border.all(color: color.withOpacity(0.3)),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
         Icon(Icons.circle, size: 8, color: color),
         const SizedBox(width: 8),
-        Text(label, style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: color)),
+        Text(label,
+            style: TextStyle(
+                fontSize: 13, fontWeight: FontWeight.bold, color: color)),
       ]),
     );
   }
 
   static Color _estadoColor(String e) => switch (e) {
-    'plan_activo' => const Color(0xFF22C55E),
-    'listo_para_plan' => const Color(0xFF3B82F6),
-    'vinculado_terapeuta' || 'perfil_clinico_incompleto' => const Color(0xFFF59E0B),
-    _ => const Color(0xFF94A3B8),
-  };
+        'plan_activo' => const Color(0xFF22C55E),
+        'listo_para_plan' => const Color(0xFF3B82F6),
+        'vinculado_terapeuta' ||
+        'perfil_clinico_incompleto' =>
+          const Color(0xFFF59E0B),
+        _ => const Color(0xFF94A3B8),
+      };
 
   static String _estadoLabel(String e) => switch (e) {
-    'plan_activo' => 'Plan activo',
-    'listo_para_plan' => 'Listo para generar plan',
-    'vinculado_terapeuta' => 'Terapeuta asignado',
-    'perfil_clinico_incompleto' => 'Perfil incompleto',
-    _ => 'Pendiente de asignación',
-  };
+        'plan_activo' => 'Plan activo',
+        'listo_para_plan' => 'Listo para generar plan',
+        'vinculado_terapeuta' => 'Terapeuta asignado',
+        'perfil_clinico_incompleto' => 'Perfil incompleto',
+        _ => 'Pendiente de asignación',
+      };
 
   // ── Panel de Navegación Rápida ────────────────────────────────────────────────
-  Widget _buildQuickNav(PacientePerfil perfil) {
+  Widget _buildQuickNav(PacientePerfil perfil, {bool compact = false}) {
     final estado = perfil.estadoClinico;
     final hasPlan = perfil.planActivoId != null;
     final isActive = estado == 'plan_activo' || estado == 'listo_para_plan';
     final isPending = estado == 'pendiente_asignacion';
-    final isIncomplete = estado == 'perfil_clinico_incompleto' || estado == 'vinculado_terapeuta';
+    final perfilObligatorio =
+        perfil.requiereScq && !perfil.tieneEvidenciaClinica;
+    final isIncomplete =
+        estado == 'perfil_clinico_incompleto' && perfilObligatorio;
+    final canGenerate = perfil.perfilValidado ||
+        (!perfilObligatorio && perfil.tieneEvidenciaClinica);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -711,19 +1002,30 @@ class _TherapeuticProfileScreenState
           _quickNavTile(
             icon: Icons.assignment_outlined,
             iconColor: const Color(0xFF4A624D),
-            bgColor: const Color(0xFFB8D6B2).withOpacity(0.25),
+            bgColor: const Color(0xFFB8D6B2).withValues(alpha: 0.25),
             label: 'Plan Terapéutico',
             subtitle: 'Ver actividades del plan activo',
-            onTap: () => context.go('/terapeuta/plan/${widget.ninoId}'),
+            onTap: () => context.push('/terapeuta/plan/${widget.ninoId}'),
           )
         else if (isIncomplete)
           _quickNavTile(
             icon: Icons.edit_note_rounded,
             iconColor: const Color(0xFFD97706),
-            bgColor: const Color(0xFFF59E0B).withOpacity(0.12),
+            bgColor: const Color(0xFFF59E0B).withValues(alpha: 0.12),
             label: 'Completar Perfil Clínico',
             subtitle: 'Requerido para generar el plan',
-            onTap: () => context.go('/terapeuta/admision?ninoId=${widget.ninoId}'),
+            onTap: () =>
+                context.push('/terapeuta/admision?ninoId=${widget.ninoId}'),
+          )
+        else if (!perfil.perfilValidado)
+          _quickNavTile(
+            icon: Icons.edit_note_rounded,
+            iconColor: const Color(0xFF4A624D),
+            bgColor: const Color(0xFFB8D6B2).withValues(alpha: 0.18),
+            label: 'Perfil clinico opcional',
+            subtitle: 'Puedes enriquecerlo si necesitas mas precision',
+            onTap: () =>
+                context.push('/terapeuta/admision?ninoId=${widget.ninoId}'),
           )
         else if (isPending)
           _quickNavTile(
@@ -737,15 +1039,15 @@ class _TherapeuticProfileScreenState
 
         const SizedBox(height: 12),
 
-        // ── Botón: Asistente IA ──────────────────────────────────────────────
+        // ── Boton: Apoyo clinico ──────────────────────────────────────────────
         _quickNavTile(
           icon: Icons.auto_awesome,
           iconColor: const Color(0xFFA43714),
           bgColor: const Color(0xFFFFF3F0),
-          label: 'Asistente IA',
-          subtitle: 'Recomendaciones y plan de sesión',
-          onTap: isActive
-              ? () => context.go('/terapeuta/ia/${widget.ninoId}')
+          label: 'Apoyo clinico',
+          subtitle: 'Recomendaciones y plan de sesion',
+          onTap: (isActive || hasPlan)
+              ? () => context.push('/terapeuta/ia/${widget.ninoId}')
               : null,
           disabledReason: isPending
               ? 'Disponible tras asignación'
@@ -764,16 +1066,116 @@ class _TherapeuticProfileScreenState
           label: 'Progreso Clínico',
           subtitle: 'Métricas y evolución de sesiones',
           onTap: hasPlan
-              ? () => context.go('/terapeuta/progreso/${widget.ninoId}')
+              ? () => context.push('/terapeuta/progreso/${widget.ninoId}')
               : null,
           disabledReason: !hasPlan ? 'Disponible con plan activo' : null,
         ),
 
         const SizedBox(height: 12),
 
-        // ── Botón: Generar/Regenerar Plan IA ────────────────────────────────
-        if (isActive)
-          _buildGeneratePlanTile(estado),
+        // Boton: Generar plan o nueva sesion
+        if (isActive || canGenerate) ...[
+          if (hasPlan) ...[
+            // Banner premium de sugerencias de IA
+            GestureDetector(
+              onTap: () {
+                context.push(
+                  '/terapeuta/plan_builder?ninoId=${widget.ninoId}&nombre=${Uri.encodeComponent(perfil.nombre)}',
+                );
+              },
+              child: Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFFFFF2CC), Color(0xFFFFF8E1)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: const Color(0xFFE2A300).withValues(alpha: 0.5)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFFE2A300).withValues(alpha: 0.1),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(Icons.auto_awesome, color: Color(0xFFD97706), size: 24),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '💡 Sugerencias de IA disponibles',
+                            style: GoogleFonts.plusJakartaSans(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                              color: const Color(0xFF8A5A00),
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'El motor clínico de RimAI ha preparado actividades personalizadas basadas en el progreso de la sesión anterior.',
+                            style: GoogleFonts.plusJakartaSans(
+                              fontSize: 12,
+                              color: const Color(0xFF6B4300),
+                              height: 1.4,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              Text(
+                                'Ver sugerencias en el constructor',
+                                style: GoogleFonts.plusJakartaSans(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12,
+                                  color: const Color(0xFFA43714),
+                                  decoration: TextDecoration.underline,
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              const Icon(
+                                Icons.arrow_forward,
+                                size: 12,
+                                color: Color(0xFFA43714),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+          _buildGeneratePlanTile(estado, enabled: canGenerate, hasPlan: hasPlan, perfil: perfil),
+        ],
+
+        if (hasPlan) ...[
+          const SizedBox(height: 12),
+          _quickNavTile(
+            icon: compact ? Icons.edit_note_rounded : Icons.manage_accounts,
+            iconColor: const Color(0xFF58423B),
+            bgColor: const Color(0xFFF5EDE4),
+            label: compact
+                ? 'Editar perfil terapeutico'
+                : 'Volver a modo de acciones',
+            subtitle: compact
+                ? 'Abrir datos clinicos, preferencias y validacion'
+                : 'Ocultar el perfil clinico y ver solo accesos directos',
+            onTap: () => context.go(compact
+                ? '/terapeuta/nino/${widget.ninoId}?editarPerfil=true'
+                : '/terapeuta/nino/${widget.ninoId}'),
+          ),
+        ],
       ],
     );
   }
@@ -803,7 +1205,7 @@ class _TherapeuticProfileScreenState
               borderRadius: BorderRadius.circular(16),
               border: Border.all(
                 color: enabled
-                    ? iconColor.withOpacity(0.18)
+                    ? iconColor.withValues(alpha: 0.18)
                     : const Color(0xFFE0E0E0),
               ),
             ),
@@ -813,7 +1215,7 @@ class _TherapeuticProfileScreenState
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
                     color: enabled
-                        ? iconColor.withOpacity(0.12)
+                        ? iconColor.withValues(alpha: 0.12)
                         : const Color(0xFFEEEEEE),
                     shape: BoxShape.circle,
                   ),
@@ -852,7 +1254,7 @@ class _TherapeuticProfileScreenState
                 Icon(
                   enabled ? Icons.chevron_right : Icons.lock_outline,
                   color: enabled
-                      ? iconColor.withOpacity(0.5)
+                      ? iconColor.withValues(alpha: 0.5)
                       : const Color(0xFFBDBDBD),
                   size: 20,
                 ),
@@ -864,11 +1266,38 @@ class _TherapeuticProfileScreenState
     );
   }
 
-  Widget _buildGeneratePlanTile(String estado) {
+  Widget _buildGeneratePlanTile(
+    String estado, {
+    required bool enabled,
+    required bool hasPlan,
+    required PacientePerfil perfil,
+  }) {
+    final title = _isGeneratingPlan
+        ? 'Generando plan...'
+        : !enabled
+            ? 'Valida el perfil antes de generar'
+            : (hasPlan ? 'Nueva sesión' : 'Generar plan terapéutico');
+
+    final subtitle = enabled
+        ? (hasPlan
+            ? 'Personaliza y planifica la siguiente sesión'
+            : 'Usa datos familiares y validacion del terapeuta')
+        : 'Confirma nivel TEA y objetivos primero';
+
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        onTap: _isGeneratingPlan ? null : _generarPlanIA,
+        onTap: _isGeneratingPlan || !enabled
+            ? null
+            : () {
+                if (hasPlan) {
+                  context.push(
+                    '/terapeuta/plan_builder?ninoId=${widget.ninoId}&nombre=${Uri.encodeComponent(perfil.nombre)}',
+                  );
+                } else {
+                  _generarPlanIA();
+                }
+              },
         borderRadius: BorderRadius.circular(16),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
@@ -877,7 +1306,7 @@ class _TherapeuticProfileScreenState
             borderRadius: BorderRadius.circular(16),
             boxShadow: [
               BoxShadow(
-                color: const Color(0xFFB8D6B2).withOpacity(0.25),
+                color: const Color(0xFFB8D6B2).withValues(alpha: 0.25),
                 blurRadius: 16,
                 offset: const Offset(0, 6),
               ),
@@ -888,12 +1317,13 @@ class _TherapeuticProfileScreenState
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFB8D6B2).withOpacity(0.15),
+                  color: const Color(0xFFB8D6B2).withValues(alpha: 0.15),
                   shape: BoxShape.circle,
                 ),
                 child: _isGeneratingPlan
                     ? const SizedBox(
-                        width: 22, height: 22,
+                        width: 22,
+                        height: 22,
                         child: CircularProgressIndicator(
                             color: Color(0xFFB8D6B2), strokeWidth: 2))
                     : const Icon(Icons.auto_awesome,
@@ -905,11 +1335,7 @@ class _TherapeuticProfileScreenState
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      _isGeneratingPlan
-                          ? 'Analizando con IA...'
-                          : (estado == 'plan_activo'
-                              ? 'Regenerar Plan con IA'
-                              : 'Generar Plan Terapéutico (IA)'),
+                      title,
                       style: const TextStyle(
                         color: Colors.white,
                         fontSize: 15,
@@ -918,9 +1344,10 @@ class _TherapeuticProfileScreenState
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      'Predicción de dificultad · Random Forest',
+                      subtitle,
                       style: TextStyle(
-                          color: Colors.white.withOpacity(0.55), fontSize: 12),
+                          color: Colors.white.withValues(alpha: 0.55),
+                          fontSize: 12),
                     ),
                   ],
                 ),
@@ -944,11 +1371,11 @@ class _TherapeuticProfileScreenState
           context: context,
           builder: (context) => AlertDialog(
             backgroundColor: const Color(0xFFFAF2E9),
-            title: Row(
-              children: const [
+            title: const Row(
+              children: [
                 Icon(Icons.auto_awesome, color: Color(0xFFA43714)),
                 SizedBox(width: 8),
-                Text("Plan Generado",
+                Text("Sesion generada",
                     style: TextStyle(
                         color: Color(0xFF1E1B16), fontWeight: FontWeight.bold)),
               ],
@@ -963,7 +1390,7 @@ class _TherapeuticProfileScreenState
                 _buildInfoRow(
                     "Dificultad:", result['dificultad_inicial'] ?? 'N/A'),
                 const SizedBox(height: 8),
-                _buildInfoRow("Confianza IA:",
+                _buildInfoRow("Confianza de sugerencia:",
                     "${((result['confianza_ia'] ?? 0) * 100).toStringAsFixed(1)}%"),
               ],
             ),
@@ -991,6 +1418,54 @@ class _TherapeuticProfileScreenState
     }
   }
 
+  Future<void> _guardarValidacionClinica(PacientePerfil perfil) async {
+    final objetivos = _objectivesController.text
+        .split('\n')
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
+    if (objetivos.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Registra al menos un objetivo.')),
+      );
+      return;
+    }
+
+    setState(() => _isSavingValidation = true);
+    try {
+      final perfilSensorial = Map<String, dynamic>.from(perfil.perfilSensorial);
+      perfilSensorial['intereses'] = _selectedInterests;
+      perfilSensorial['estimulosAversivos'] = _aversiveStimuli;
+      await ref.read(perfilServiceProvider).actualizarPerfilClinico(
+        widget.ninoId,
+        {
+          'nivel_cognitivo': perfil.nivelCognitivo,
+          'diagnostico': perfil.diagnostico,
+          'perfil_sensorial': perfilSensorial,
+          'objetivos_intervencion': objetivos,
+          'observaciones_clinicas': _clinicalNotesController.text.trim(),
+        },
+      );
+      await ref.read(dashboardServiceProvider).validarNivelTea(
+            ninoId: widget.ninoId,
+            nivelTea: _nivelTea,
+            observacion: _clinicalNotesController.text.trim(),
+          );
+      ref.invalidate(perfilPacienteProvider(widget.ninoId));
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Validacion clinica guardada.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo guardar la validacion: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _isSavingValidation = false);
+    }
+  }
+
   Widget _buildInfoRow(String label, String value) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -998,7 +1473,7 @@ class _TherapeuticProfileScreenState
         Text(label,
             style: TextStyle(
                 fontWeight: FontWeight.bold,
-                color: const Color(0xFF58423B).withOpacity(0.7))),
+                color: const Color(0xFF58423B).withValues(alpha: 0.7))),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
           decoration: BoxDecoration(

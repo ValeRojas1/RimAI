@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:rimai_app/core/providers/dashboard_providers.dart';
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
@@ -242,17 +243,138 @@ class _DetailSheet extends ConsumerStatefulWidget {
 class _DetailSheetState extends ConsumerState<_DetailSheet> {
   bool _linking = false;
 
+  Future<bool?> _showVinculacionDialog(BuildContext context) {
+    return showDialog<bool>(
+      context: context,
+      builder: (ctx) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        backgroundColor: _kBg,
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: _kA.withOpacity(0.2),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.assignment_ind_outlined,
+                  size: 40,
+                  color: Color(0xFF4A624D),
+                ),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                'Perfil Clínico Opcional',
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: _kText,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 12),
+              Text(
+                '¿Deseas completar el perfil clínico detallado en este momento o prefieres utilizar directamente la información cargada por la familia?',
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 14,
+                  color: _kSub,
+                  height: 1.4,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(ctx, false), // No, omitir
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: _kSub,
+                        side: const BorderSide(color: _kBdr),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                      child: Text(
+                        'Omitir / Usar del Padre',
+                        style: GoogleFonts.plusJakartaSans(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 11,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () => Navigator.pop(ctx, true), // Sí, completar
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _kP,
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                      child: Text(
+                        'Completar Ahora',
+                        style: GoogleFonts.plusJakartaSans(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 11,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _vincular() async {
+    final p = widget.paciente;
+    bool shouldEdit = true;
+
+    if (!p.requiereScq) {
+      final res = await _showVinculacionDialog(context);
+      if (res == null) return; // canceló
+      shouldEdit = res;
+    }
+
     setState(() => _linking = true);
     try {
-      // 1. Vincular en backend → estado pasa a perfil_clinico_incompleto
-      await widget.ref.read(dashboardServiceProvider).vincularPorId(widget.paciente.id);
-      // 2. Refrescar bandeja de espera
-      widget.ref.invalidate(pendientesProvider);
-      // 3. Navegar a la pantalla de enriquecimiento clínico
-      if (mounted) {
-        Navigator.pop(context);
-        context.go('/terapeuta/admision?ninoId=${widget.paciente.id}');
+      if (shouldEdit) {
+        // Vinculación normal y navegar a admisión
+        await widget.ref.read(dashboardServiceProvider).vincularPorId(p.id, omitirPerfil: false);
+        widget.ref.invalidate(pendientesProvider);
+        if (mounted) {
+          Navigator.pop(context);
+          context.go('/terapeuta/admision?ninoId=${p.id}');
+        }
+      } else {
+        // Vinculación omitiendo el perfil (se auto-infiere en backend)
+        await widget.ref.read(dashboardServiceProvider).vincularPorId(p.id, omitirPerfil: true);
+        widget.ref.invalidate(pendientesProvider);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Paciente vinculado con éxito usando datos familiares.'),
+              backgroundColor: Color(0xFF4A624D),
+            ),
+          );
+          Navigator.pop(context);
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -265,15 +387,210 @@ class _DetailSheetState extends ConsumerState<_DetailSheet> {
     }
   }
 
+  Widget _sectionCard({
+    required String title,
+    required IconData icon,
+    required List<Widget> children,
+    bool initiallyExpanded = false,
+  }) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _kBdr.withOpacity(0.5)),
+        boxShadow: [
+          BoxShadow(
+            color: _kBdr.withOpacity(0.1),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          )
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: ExpansionTile(
+          initiallyExpanded: initiallyExpanded,
+          leading: Icon(icon, color: _kP, size: 20),
+          title: Text(
+            title,
+            style: GoogleFonts.plusJakartaSans(
+              fontWeight: FontWeight.bold,
+              color: _kText,
+              fontSize: 14,
+            ),
+          ),
+          iconColor: _kP,
+          collapsedIconColor: _kSub,
+          childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          expandedCrossAxisAlignment: CrossAxisAlignment.start,
+          children: children,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final p = widget.paciente;
     final fechaFmt = DateFormat('dd MMM yyyy').format(p.fechaRegistro);
 
+    // 1. Hitos y Comunicación
+    final hitos = p.hitos;
+    final hWidgets = <Widget>[];
+    if (hitos.isEmpty) {
+      hWidgets.add(Text('No se registraron hitos del desarrollo.',
+          style: GoogleFonts.plusJakartaSans(fontSize: 13, color: _kSub)));
+    } else {
+      hitos.forEach((k, v) {
+        hWidgets.add(Padding(
+          padding: const EdgeInsets.only(bottom: 8.0),
+          child: RichText(
+            text: TextSpan(
+              style: GoogleFonts.plusJakartaSans(fontSize: 13, color: _kText),
+              children: [
+                TextSpan(
+                    text: '${k.toUpperCase().replaceAll('_', ' ')}: ',
+                    style: const TextStyle(fontWeight: FontWeight.bold)),
+                TextSpan(text: '$v', style: GoogleFonts.plusJakartaSans(color: _kSub)),
+              ],
+            ),
+          ),
+        ));
+      });
+    }
+
+    // 2. Perfil Sensorial Familiar
+    final sens = p.sensorialFamilia;
+    final aversivos = p.estimulosAversivos;
+    final rutinas = p.rutinasRegulacion;
+    final sWidgets = <Widget>[];
+    if (sens.isNotEmpty) {
+      sWidgets.add(Text('Comportamientos Sensoriales:',
+          style: GoogleFonts.plusJakartaSans(fontSize: 13, fontWeight: FontWeight.bold, color: _kText)));
+      sens.forEach((k, v) {
+        sWidgets.add(Padding(
+          padding: const EdgeInsets.only(left: 8.0, top: 4.0, bottom: 8.0),
+          child: Text('• ${k.toUpperCase().replaceAll('_', ' ')}: $v',
+              style: GoogleFonts.plusJakartaSans(fontSize: 13, color: _kSub)),
+        ));
+      });
+    }
+    if (aversivos.isNotEmpty) {
+      if (sWidgets.isNotEmpty) sWidgets.add(const SizedBox(height: 12));
+      sWidgets.add(Text('Estímulos Aversivos:',
+          style: GoogleFonts.plusJakartaSans(fontSize: 13, fontWeight: FontWeight.bold, color: _kText)));
+      aversivos.forEach((k, v) {
+        sWidgets.add(Padding(
+          padding: const EdgeInsets.only(left: 8.0, top: 4.0, bottom: 8.0),
+          child: Text('• ${k.toUpperCase().replaceAll('_', ' ')}: $v',
+              style: GoogleFonts.plusJakartaSans(fontSize: 13, color: _kSub)),
+        ));
+      });
+    }
+    if (rutinas.isNotEmpty) {
+      if (sWidgets.isNotEmpty) sWidgets.add(const SizedBox(height: 12));
+      sWidgets.add(Text('Rutinas de Regulación:',
+          style: GoogleFonts.plusJakartaSans(fontSize: 13, fontWeight: FontWeight.bold, color: _kText)));
+      sWidgets.add(Padding(
+        padding: const EdgeInsets.only(left: 8.0, top: 4.0),
+        child: Text(rutinas.join(', '), style: GoogleFonts.plusJakartaSans(fontSize: 13, color: _kSub)),
+      ));
+    }
+    if (sens.isEmpty && aversivos.isEmpty && rutinas.isEmpty) {
+      sWidgets.add(Text('No se registraron datos sensoriales.',
+          style: GoogleFonts.plusJakartaSans(fontSize: 13, color: _kSub)));
+    }
+
+    // 3. Documentos Adjuntos
+    final docs = p.documentosClinicos;
+    final dWidgets = <Widget>[];
+    if (docs.isEmpty || docs.values.every((v) => v == null || v.toString().isEmpty)) {
+      dWidgets.add(Text('No se adjuntaron documentos clínicos.',
+          style: GoogleFonts.plusJakartaSans(fontSize: 13, color: _kSub)));
+    } else {
+      docs.forEach((k, v) {
+        if (v != null && v.toString().isNotEmpty) {
+          final docUrl = v.toString();
+          dWidgets.add(Container(
+            margin: const EdgeInsets.only(bottom: 10),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: _kSurf,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: _kBdr.withOpacity(0.5)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.picture_as_pdf, color: _kP, size: 24),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        k.replaceAll('_', ' ').toUpperCase(),
+                        style: GoogleFonts.plusJakartaSans(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: _kText,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Documento PDF',
+                        style: GoogleFonts.plusJakartaSans(
+                          fontSize: 10,
+                          color: _kSub,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                ElevatedButton(
+                  onPressed: () async {
+                    final uri = Uri.parse(docUrl);
+                    if (await canLaunchUrl(uri)) {
+                      await launchUrl(uri, mode: LaunchMode.externalApplication);
+                    } else {
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('No se pudo abrir el enlace: $docUrl'),
+                            backgroundColor: Colors.red.shade800,
+                          ),
+                        );
+                      }
+                    }
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _kP,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  ),
+                  child: Text(
+                    'Ver',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ));
+        }
+      });
+    }
+
     return DraggableScrollableSheet(
-      initialChildSize: 0.65,
-      minChildSize: 0.4,
-      maxChildSize: 0.92,
+      initialChildSize: 0.85,
+      minChildSize: 0.5,
+      maxChildSize: 0.95,
       builder: (_, ctrl) => Container(
         decoration: const BoxDecoration(
           color: _kBg,
@@ -281,8 +598,12 @@ class _DetailSheetState extends ConsumerState<_DetailSheet> {
         ),
         child: Column(children: [
           // Handle
-          Container(margin: const EdgeInsets.only(top: 12), width: 40, height: 4,
-              decoration: BoxDecoration(color: _kBdr, borderRadius: BorderRadius.circular(2))),
+          Container(
+            margin: const EdgeInsets.only(top: 12),
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(color: _kBdr, borderRadius: BorderRadius.circular(2)),
+          ),
           // Header
           Padding(
             padding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
@@ -304,57 +625,117 @@ class _DetailSheetState extends ConsumerState<_DetailSheet> {
           ),
           const Divider(height: 28, indent: 24, endIndent: 24),
           // Content
-          Expanded(child: ListView(controller: ctrl, padding: const EdgeInsets.fromLTRB(24, 0, 24, 24), children: [
-            _row('Familia / Tutor', p.tutorNombre ?? 'No registrado'),
-            if (p.diagnostico != null) _row('Diagnóstico', p.diagnostico!),
-            if (p.comunicacion != null) _row('Comunicación', p.comunicacion!),
-            if (p.intereses.isNotEmpty) _row('Intereses', p.intereses.join(', ')),
-            const SizedBox(height: 20),
-            // Aviso
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: _kA.withOpacity(0.2),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const Icon(Icons.info_outline, color: Color(0xFF4A624D), size: 16),
-                const SizedBox(width: 10),
-                Expanded(child: Text(
-                  'Al vincular, podrás completar el perfil clínico y luego generar el plan terapéutico con IA.',
-                  style: GoogleFonts.plusJakartaSans(fontSize: 12, color: _kText),
-                )),
-              ]),
+          Expanded(
+            child: ListView(
+              controller: ctrl,
+              padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+              children: [
+                // 1. Datos Generales y Tutor
+                _sectionCard(
+                  title: 'Datos Generales y Tutor',
+                  icon: Icons.person_outline,
+                  initiallyExpanded: true,
+                  children: [
+                    _row('Familia / Tutor', p.tutorNombre ?? 'No registrado'),
+                    if (p.diagnostico != null) _row('Diagnóstico', p.diagnostico!),
+                    _row('Medicación Actual', p.medicacionActual ?? 'Ninguna reportada'),
+                    if (p.requiereScq) ...[
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFF0EC),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: _kP.withOpacity(0.3)),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.assignment_outlined, color: _kP, size: 16),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Caso SCQ obligatorio · Puntaje: ${p.scqPuntaje ?? "Sin datos"} (${p.scqNivel ?? "Sin datos"})',
+                                style: GoogleFonts.plusJakartaSans(fontSize: 12, color: _kP, fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+
+                // 2. Hitos y Comunicación
+                _sectionCard(
+                  title: 'Hitos del Desarrollo y Comunicación',
+                  icon: Icons.emoji_events_outlined,
+                  children: hWidgets,
+                ),
+
+                // 3. Perfil Sensorial Familiar
+                _sectionCard(
+                  title: 'Perfil Sensorial Familiar',
+                  icon: Icons.favorite_border_rounded,
+                  children: sWidgets,
+                ),
+
+                // 4. Documentos del Expediente
+                _sectionCard(
+                  title: 'Documentos del Expediente',
+                  icon: Icons.folder_open_outlined,
+                  children: dWidgets,
+                ),
+
+                const SizedBox(height: 10),
+                // Aviso
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: _kA.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const Icon(Icons.info_outline, color: Color(0xFF4A624D), size: 16),
+                    const SizedBox(width: 10),
+                    Expanded(child: Text(
+                      p.requiereScq
+                          ? 'Al vincular, deberás completar obligatoriamente el perfil clínico antes de generar el plan terapéutico.'
+                          : 'Al vincular, podrás rellenar el perfil clínico ahora o utilizar el expediente familiar para generar el plan terapéutico con IA.',
+                      style: GoogleFonts.plusJakartaSans(fontSize: 12, color: _kText),
+                    )),
+                  ]),
+                ),
+                const SizedBox(height: 24),
+                // Acciones
+                ElevatedButton.icon(
+                  onPressed: _linking ? null : _vincular,
+                  icon: _linking
+                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                      : const Icon(Icons.link_rounded),
+                  label: Text(_linking ? 'Vinculando...' : 'Aceptar y vincular paciente',
+                      style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.bold, fontSize: 15)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _kP,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 15),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                    elevation: 0,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                OutlinedButton(
+                  onPressed: () => Navigator.pop(context),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: _kSub,
+                    side: const BorderSide(color: _kBdr),
+                    padding: const EdgeInsets.symmetric(vertical: 13),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  ),
+                  child: Text('Cerrar', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.bold)),
+                ),
+              ],
             ),
-            const SizedBox(height: 24),
-            // Acciones
-            ElevatedButton.icon(
-              onPressed: _linking ? null : _vincular,
-              icon: _linking
-                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                  : const Icon(Icons.link_rounded),
-              label: Text(_linking ? 'Vinculando...' : 'Aceptar y vincular paciente',
-                  style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.bold, fontSize: 15)),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _kP,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 15),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                elevation: 0,
-              ),
-            ),
-            const SizedBox(height: 10),
-            OutlinedButton(
-              onPressed: () => Navigator.pop(context),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: _kSub,
-                side: const BorderSide(color: _kBdr),
-                padding: const EdgeInsets.symmetric(vertical: 13),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-              ),
-              child: Text('Cerrar', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.bold)),
-            ),
-          ])),
+          ),
         ]),
       ),
     );

@@ -9,3 +9,9 @@ rimai_pgdata/
 .idea/build/
 __pycache__/
 *.pyc
+
+# Virtual Environment
+backend/venv/
+backend/.venv/
+venv/
+.venv/

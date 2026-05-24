@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:rimai_app/core/providers/dashboard_providers.dart';
 import 'package:rimai_app/core/providers/auth_providers.dart';
+import 'package:rimai_app/adapters/input/widgets/rimai_bottom_nav.dart';
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const _kP = Color(0xFFA43714);
@@ -35,7 +36,7 @@ String _estadoLabel(String e) => switch (e) {
 
 // ── Screen ────────────────────────────────────────────────────────────────────
 class FamiliaDashboardScreen extends ConsumerStatefulWidget {
-  const FamiliaDashboardScreen({Key? key}) : super(key: key);
+  const FamiliaDashboardScreen({super.key});
   @override
   ConsumerState<FamiliaDashboardScreen> createState() => _State();
 }
@@ -66,6 +67,7 @@ class _State extends ConsumerState<FamiliaDashboardScreen> {
   final Set<String> _hipo = {};
   final Set<String> _rep = {};
   final _rutinaCtrl = TextEditingController();
+  final List<String> _rutinas = [];
 
   // Step 4
   String? _docDiagnosticoName;
@@ -75,6 +77,7 @@ class _State extends ConsumerState<FamiliaDashboardScreen> {
   String? _medicacionFileName;
   String? _medicacionFilePath;
   final _medicacionCtrl = TextEditingController();
+  final List<String> _medicaciones = [];
 
   // Step 5
   final Set<String> _int = {};
@@ -92,6 +95,36 @@ class _State extends ConsumerState<FamiliaDashboardScreen> {
 
   void _tog(Set<String> s, String v) =>
       setState(() => s.contains(v) ? s.remove(v) : s.add(v));
+
+  List<String> _currentRows(
+    List<String> savedRows,
+    TextEditingController controller,
+  ) {
+    return controller.text
+        .split('\n')
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .followedBy(savedRows)
+        .toSet()
+        .toList();
+  }
+
+  void _addRow(List<String> target, TextEditingController controller) {
+    final rows = controller.text
+        .split('\n')
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
+    if (rows.isEmpty) return;
+    setState(() {
+      target.addAll(rows.where((row) => !target.contains(row)));
+      controller.clear();
+    });
+  }
+
+  void _removeRow(List<String> target, String row) {
+    setState(() => target.remove(row));
+  }
 
   Future<void> _pickDate() async {
     final p = await showDatePicker(
@@ -167,11 +200,7 @@ class _State extends ConsumerState<FamiliaDashboardScreen> {
         'comportamientos_repetitivos': _rep.toList(),
         'intereses_obsesivos': _int.toList(),
       },
-      'rutinas_regulacion': _rutinaCtrl.text
-          .split('\n')
-          .map((e) => e.trim())
-          .where((e) => e.isNotEmpty)
-          .toList(),
+      'rutinas_regulacion': _currentRows(_rutinas, _rutinaCtrl),
       'documentos_clinicos': {
         if (_docDiagnosticoName != null)
           'evaluacion_profesional': _docDiagnosticoName,
@@ -179,8 +208,9 @@ class _State extends ConsumerState<FamiliaDashboardScreen> {
           'plan_terapeutico_previo': _planTerapeuticoName,
         if (_medicacionFileName != null) 'medicacion': _medicacionFileName,
       },
-      if (_medicacionCtrl.text.trim().isNotEmpty)
-        'medicacion_actual': _medicacionCtrl.text.trim(),
+      if (_medicaciones.isNotEmpty || _medicacionCtrl.text.trim().isNotEmpty)
+        'medicacion_actual':
+            _currentRows(_medicaciones, _medicacionCtrl).join('\n'),
       'intereses': _int.toList(),
     };
   }
@@ -235,7 +265,8 @@ class _State extends ConsumerState<FamiliaDashboardScreen> {
 
   bool _debeSugerirScq() {
     final tieneDiagnostico = _diagCtrl.text.trim().isNotEmpty;
-    final tieneMedicacion = _medicacionCtrl.text.trim().isNotEmpty;
+    final tieneMedicacion =
+        _medicacionCtrl.text.trim().isNotEmpty || _medicaciones.isNotEmpty;
     final tieneDocumento = _docDiagnosticoName != null ||
         _planTerapeuticoName != null ||
         _medicacionFileName != null;
@@ -255,7 +286,9 @@ class _State extends ConsumerState<FamiliaDashboardScreen> {
     _rep.clear();
     _int.clear();
     _rutinaCtrl.clear();
+    _rutinas.clear();
     _medicacionCtrl.clear();
+    _medicaciones.clear();
     _docDiagnosticoName = null;
     _docDiagnosticoPath = null;
     _planTerapeuticoName = null;
@@ -345,8 +378,11 @@ class _State extends ConsumerState<FamiliaDashboardScreen> {
       _int.addAll(p.intereses.isNotEmpty
           ? p.intereses
           : _listFrom(p.sensorial['intereses_obsesivos']));
-      _rutinaCtrl.text = p.rutinasRegulacion.join('\n');
-      _medicacionCtrl.text = p.medicacionActual ?? '';
+      _rutinas.addAll(p.rutinasRegulacion);
+      _medicaciones.addAll((p.medicacionActual ?? '')
+          .split(RegExp(r'[\n;]'))
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty));
       _docDiagnosticoName =
           _documentName(p.documentosClinicos, 'evaluacion_profesional');
       _planTerapeuticoName =
@@ -431,19 +467,38 @@ class _State extends ConsumerState<FamiliaDashboardScreen> {
   @override
   Widget build(BuildContext context) {
     final async = ref.watch(familiaDashboardProvider);
-    return Scaffold(
-      backgroundColor: _kBg,
-      body: async.when(
-        loading: () =>
-            const Center(child: CircularProgressIndicator(color: _kP)),
-        error: (e, _) => _buildError(e.toString()),
-        data: (data) {
-          final show = _wizardMode || data.pacientes.isEmpty;
-          return show
-              ? _buildWizard(data.pacientes.isNotEmpty)
-              : _buildStatus(data);
-        },
+    return async.when(
+      loading: () => const Scaffold(
+        backgroundColor: _kBg,
+        body: Center(child: CircularProgressIndicator(color: _kP)),
       ),
+      error: (e, _) => Scaffold(
+        backgroundColor: _kBg,
+        body: _buildError(e.toString()),
+      ),
+      data: (data) {
+        final showWizard = _wizardMode || data.pacientes.isEmpty;
+        return Scaffold(
+          backgroundColor: _kBg,
+          body: showWizard
+              ? _buildWizard(data.pacientes.isNotEmpty)
+              : _buildStatus(data),
+          bottomNavigationBar: showWizard
+              ? null
+              : RimAIBottomNav(
+                  currentIndex: 0,
+                  onTap: (index) {
+                    if (index == 1) {
+                      context.go('/familia/chatbot');
+                    }
+                  },
+                  items: [
+                    BottomNavItem(icon: Icons.home_rounded, label: 'Inicio'),
+                    BottomNavItem(icon: Icons.psychology_rounded, label: 'Asistente IA'),
+                  ],
+                ),
+        );
+      },
     );
   }
 
@@ -573,7 +628,7 @@ class _State extends ConsumerState<FamiliaDashboardScreen> {
                 borderRadius: BorderRadius.circular(4),
                 child: LinearProgressIndicator(
                   value: (_step + 1) / 5,
-                  backgroundColor: _kBdr.withOpacity(0.4),
+                  backgroundColor: _kBdr.withValues(alpha: 0.4),
                   valueColor: const AlwaysStoppedAnimation<Color>(_kP),
                   minHeight: 4,
                 ),
@@ -606,7 +661,8 @@ class _State extends ConsumerState<FamiliaDashboardScreen> {
         padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
         decoration: BoxDecoration(
             color: _kBg,
-            border: Border(top: BorderSide(color: _kBdr.withOpacity(0.5)))),
+            border:
+                Border(top: BorderSide(color: _kBdr.withValues(alpha: 0.5)))),
         child: Row(children: [
           if (_step > 0) ...[
             Expanded(
@@ -655,6 +711,9 @@ class _State extends ConsumerState<FamiliaDashboardScreen> {
 
   Widget _topBar(
       {required bool showAdd, bool canBack = false, VoidCallback? onBack}) {
+    final notifAsync = ref.watch(notificacionesProvider);
+    final unreadCount = notifAsync.valueOrNull?.where((n) => !n.leido).length ?? 0;
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       child: Row(children: [
@@ -683,6 +742,16 @@ class _State extends ConsumerState<FamiliaDashboardScreen> {
             }),
           ),
         IconButton(
+          icon: Badge(
+            isLabelVisible: unreadCount > 0,
+            label: Text('$unreadCount'),
+            backgroundColor: _kP,
+            child: const Icon(Icons.notifications_active_outlined, color: _kSub, size: 22),
+          ),
+          tooltip: 'Notificaciones',
+          onPressed: () => _mostrarNotificacionesModal(),
+        ),
+        IconButton(
           icon: const Icon(Icons.logout, color: _kSub, size: 20),
           onPressed: () async {
             await ref.read(authStorageProvider).clearSession();
@@ -690,6 +759,191 @@ class _State extends ConsumerState<FamiliaDashboardScreen> {
           },
         ),
       ]),
+    );
+  }
+
+  void _mostrarNotificacionesModal() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return Consumer(
+          builder: (context, ref, child) {
+            final async = ref.watch(notificacionesProvider);
+            return Container(
+              height: MediaQuery.of(context).size.height * 0.7,
+              decoration: const BoxDecoration(
+                color: _kBg,
+                borderRadius: BorderRadius.only(
+                  topLeft: Radius.circular(28),
+                  topRight: Radius.circular(28),
+                ),
+              ),
+              child: Column(
+                children: [
+                  const SizedBox(height: 12),
+                  Container(
+                    width: 48,
+                    height: 5,
+                    decoration: BoxDecoration(
+                      color: _kSub.withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(100),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 24),
+                    child: Row(
+                      children: [
+                        Text(
+                          'Centro de Notificaciones',
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w800,
+                            color: _kText,
+                          ),
+                        ),
+                        const Spacer(),
+                        const Icon(Icons.notifications_outlined, color: _kP),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Divider(color: _kBdr, height: 1),
+                  Expanded(
+                    child: async.when(
+                      loading: () => const Center(
+                        child: CircularProgressIndicator(color: _kP),
+                      ),
+                      error: (err, _) => Center(
+                        child: Text(
+                          'Error al cargar notificaciones: $err',
+                          style: const TextStyle(color: _kSub),
+                        ),
+                      ),
+                      data: (list) {
+                        if (list.isEmpty) {
+                          return Center(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.notifications_off_outlined,
+                                  size: 48,
+                                  color: _kSub.withValues(alpha: 0.4),
+                                ),
+                                const SizedBox(height: 12),
+                                Text(
+                                  'No tienes notificaciones aún',
+                                  style: TextStyle(
+                                    color: _kSub.withValues(alpha: 0.6),
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        }
+                        return ListView.builder(
+                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                          itemCount: list.length,
+                          itemBuilder: (context, index) {
+                            final n = list[index];
+                            return Opacity(
+                              opacity: n.leido ? 0.65 : 1.0,
+                              child: Container(
+                                margin: const EdgeInsets.only(bottom: 12),
+                                padding: const EdgeInsets.all(16),
+                                decoration: BoxDecoration(
+                                  color: n.leido ? _kSurf : Colors.white,
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(
+                                    color: n.leido ? Colors.transparent : _kBdr,
+                                    width: 1,
+                                  ),
+                                  boxShadow: n.leido
+                                      ? null
+                                      : [
+                                          BoxShadow(
+                                            color: _kP.withValues(alpha: 0.05),
+                                            blurRadius: 10,
+                                            offset: const Offset(0, 4),
+                                          ),
+                                        ],
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        if (!n.leido)
+                                          Container(
+                                            margin: const EdgeInsets.only(right: 8),
+                                            width: 8,
+                                            height: 8,
+                                            decoration: const BoxDecoration(
+                                              color: _kP,
+                                              shape: BoxShape.circle,
+                                            ),
+                                          ),
+                                        Expanded(
+                                          child: Text(
+                                            n.titulo,
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 15,
+                                              color: n.leido ? _kSub : _kText,
+                                            ),
+                                          ),
+                                        ),
+                                        if (!n.leido)
+                                          IconButton(
+                                            icon: const Icon(Icons.done, size: 18, color: _kP),
+                                            tooltip: 'Marcar como leída',
+                                            constraints: const BoxConstraints(),
+                                            padding: EdgeInsets.zero,
+                                            onPressed: () async {
+                                              try {
+                                                await ref
+                                                    .read(dashboardServiceProvider)
+                                                    .marcarNotificacionLeida(n.id);
+                                                ref.invalidate(notificacionesProvider);
+                                              } catch (e) {
+                                                if (context.mounted) {
+                                                  ScaffoldMessenger.of(context).showSnackBar(
+                                                    SnackBar(content: Text('Error: $e')),
+                                                  );
+                                                }
+                                              }
+                                            },
+                                          ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 6),
+                                    Text(
+                                      n.mensaje,
+                                      style: TextStyle(
+                                        color: _kSub,
+                                        fontSize: 13,
+                                        height: 1.35,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
     );
   }
 
@@ -795,14 +1049,13 @@ class _State extends ConsumerState<FamiliaDashboardScreen> {
                     ],
                     _rep),
                 const SizedBox(height: 20),
-                _label('RUTINAS DE REGULACION'),
-                TextFormField(
+                _editableRows(
+                  label: 'RUTINAS DE REGULACION',
+                  hint: 'Ej: presion profunda, balanceo, objeto preferido',
                   controller: _rutinaCtrl,
-                  maxLines: 4,
-                  decoration: _dec(
-                      'Ej: presion profunda, balanceo, objeto preferido...'),
-                  style:
-                      GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600),
+                  rows: _rutinas,
+                  onAdd: () => _addRow(_rutinas, _rutinaCtrl),
+                  onRemove: (row) => _removeRow(_rutinas, row),
                 ),
               ])),
         ]),
@@ -839,13 +1092,13 @@ class _State extends ConsumerState<FamiliaDashboardScreen> {
                 _fileButton('Documento de medicacion', _medicacionFileName,
                     () => _pickClinicalFile('medicacion')),
                 const SizedBox(height: 16),
-                _label('MEDICACION ACTUAL (opcional)'),
-                TextFormField(
+                _editableRows(
+                  label: 'MEDICACION ACTUAL (opcional)',
+                  hint: 'Nombre, dosis o indicaciones si aplica',
                   controller: _medicacionCtrl,
-                  maxLines: 2,
-                  decoration: _dec('Nombre, dosis o indicaciones si aplica'),
-                  style:
-                      GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600),
+                  rows: _medicaciones,
+                  onAdd: () => _addRow(_medicaciones, _medicacionCtrl),
+                  onRemove: (row) => _removeRow(_medicaciones, row),
                 ),
               ])),
         ]),
@@ -904,6 +1157,16 @@ class _State extends ConsumerState<FamiliaDashboardScreen> {
                             : _diagCtrl.text.trim()),
                     _summaryRow('Comunicación', _com),
                     _summaryRow(
+                        'Rutinas',
+                        _currentRows(_rutinas, _rutinaCtrl).isEmpty
+                            ? 'No registradas'
+                            : '${_currentRows(_rutinas, _rutinaCtrl).length} registradas'),
+                    _summaryRow(
+                        'Medicacion',
+                        _currentRows(_medicaciones, _medicacionCtrl).isEmpty
+                            ? 'No registrada'
+                            : '${_currentRows(_medicaciones, _medicacionCtrl).length} registros'),
+                    _summaryRow(
                         'Antecedentes',
                         [
                           _docDiagnosticoName,
@@ -918,7 +1181,7 @@ class _State extends ConsumerState<FamiliaDashboardScreen> {
                     Container(
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                          color: _kA.withOpacity(0.3),
+                          color: _kA.withValues(alpha: 0.3),
                           borderRadius: BorderRadius.circular(10)),
                       child: Row(children: [
                         const Icon(Icons.info_outline,
@@ -980,7 +1243,7 @@ class _State extends ConsumerState<FamiliaDashboardScreen> {
             borderRadius: BorderRadius.circular(12),
             borderSide: const BorderSide(color: _kP, width: 1.5)),
         contentPadding: const EdgeInsets.all(14),
-        hintStyle: TextStyle(color: _kSub.withOpacity(0.5), fontSize: 14),
+        hintStyle: TextStyle(color: _kSub.withValues(alpha: 0.5), fontSize: 14),
       );
 
   Widget _field(String label, String hint, TextEditingController ctrl) =>
@@ -992,6 +1255,93 @@ class _State extends ConsumerState<FamiliaDashboardScreen> {
               controller: ctrl,
               decoration: _dec(hint),
               style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600)),
+        ],
+      );
+
+  Widget _editableRows({
+    required String label,
+    required String hint,
+    required TextEditingController controller,
+    required List<String> rows,
+    required VoidCallback onAdd,
+    required ValueChanged<String> onRemove,
+  }) =>
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _label(label),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: TextFormField(
+                  controller: controller,
+                  minLines: 1,
+                  maxLines: 3,
+                  decoration: _dec(hint),
+                  style:
+                      GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600),
+                ),
+              ),
+              const SizedBox(width: 8),
+              SizedBox(
+                height: 48,
+                child: FilledButton(
+                  onPressed: onAdd,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: _kP,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
+                  ),
+                  child: const Icon(Icons.add, size: 20),
+                ),
+              ),
+            ],
+          ),
+          if (rows.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Column(
+              children: rows
+                  .map(
+                    (row) => Container(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: _kBdr),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              row,
+                              style: GoogleFonts.plusJakartaSans(
+                                fontWeight: FontWeight.w600,
+                                color: _kText,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: 'Quitar',
+                            onPressed: () => onRemove(row),
+                            icon:
+                                const Icon(Icons.close, size: 18, color: _kSub),
+                            constraints: const BoxConstraints(
+                                minWidth: 32, minHeight: 32),
+                            padding: EdgeInsets.zero,
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                  .toList(),
+            ),
+          ],
         ],
       );
 
@@ -1112,13 +1462,13 @@ class _PatientCard extends ConsumerWidget {
       decoration: BoxDecoration(
         color: _kSurf,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: _kBdr.withOpacity(0.5)),
+        border: Border.all(color: _kBdr.withValues(alpha: 0.5)),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           CircleAvatar(
             radius: 22,
-            backgroundColor: _kA.withOpacity(0.4),
+            backgroundColor: _kA.withValues(alpha: 0.4),
             child: Text((p.nombre.isNotEmpty ? p.nombre[0] : '?').toUpperCase(),
                 style: const TextStyle(
                     fontSize: 18, fontWeight: FontWeight.bold, color: _kText)),
@@ -1155,9 +1505,9 @@ class _PatientCard extends ConsumerWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
               decoration: BoxDecoration(
-                color: color.withOpacity(0.12),
+                color: color.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(100),
-                border: Border.all(color: color.withOpacity(0.3)),
+                border: Border.all(color: color.withValues(alpha: 0.3)),
               ),
               child: Text(label,
                   style: GoogleFonts.plusJakartaSans(
@@ -1237,6 +1587,30 @@ class _PatientCard extends ConsumerWidget {
                     style: GoogleFonts.plusJakartaSans(
                         fontSize: 12, color: _kSub))),
           ]),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              icon: const Icon(Icons.play_circle_outline, size: 18),
+              label: Text(
+                'Ver plan publicado',
+                style: GoogleFonts.plusJakartaSans(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12,
+                ),
+              ),
+              onPressed: () => context.go('/familia/plan/${p.id}'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _kA,
+                foregroundColor: _kText,
+                elevation: 0,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+            ),
+          ),
         ],
       ]),
     );

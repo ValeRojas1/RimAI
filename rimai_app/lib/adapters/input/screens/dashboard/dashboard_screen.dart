@@ -60,16 +60,19 @@ class DashboardScreen extends ConsumerWidget {
         currentIndex: 0,
         onTap: (i) {
           final pacientes = dashboardAsync.valueOrNull?.pacientes ?? [];
+          if (i == 1) {
+            context.go('/terapeuta/planes');
+            return;
+          }
           if (pacientes.isEmpty) return;
           final first = pacientes.first;
-          if (i == 1) context.go('/terapeuta/plan/${first.id}');
           if (i == 2) context.go('/terapeuta/ia/${first.id}');
           if (i == 3) context.go('/terapeuta/progreso/${first.id}');
         },
         items: [
           BottomNavItem(icon: Icons.home_rounded, label: 'Inicio'),
-          BottomNavItem(icon: Icons.spatial_audio_off, label: 'Sesión'),
-          BottomNavItem(icon: Icons.auto_awesome, label: 'IA'),
+          BottomNavItem(icon: Icons.spatial_audio_off, label: 'Planes'),
+          BottomNavItem(icon: Icons.auto_awesome, label: 'Apoyo'),
           BottomNavItem(icon: Icons.insights, label: 'Progreso'),
         ],
       ),
@@ -332,11 +335,12 @@ class DashboardScreen extends ConsumerWidget {
       runSpacing: 12,
       children: [
         _QuickAccessButton(
-          label: 'Asistente IA',
+          label: 'Apoyo clinico',
           icon: Icons.auto_awesome,
           onTap: () {
-            if (firstPatient != null)
+            if (firstPatient != null) {
               context.go('/terapeuta/ia/${firstPatient.id}');
+            }
           },
         ),
         _QuickAccessButton(
@@ -346,12 +350,13 @@ class DashboardScreen extends ConsumerWidget {
         ),
         _QuickAccessButton(
           label: 'Nueva Sesión',
-          icon: Icons.add_circle_outline_rounded,
-          onTap: () {
-            if (firstPatient != null)
-              context.go('/terapeuta/plan/${firstPatient.id}');
-          },
-        ),
+            icon: Icons.add_circle_outline_rounded,
+            onTap: () {
+              if (firstPatient != null) {
+                context.push('/terapeuta/plan/${firstPatient.id}');
+              }
+            },
+          ),
         _QuickAccessButton(
           label: 'Actividades',
           icon: Icons.fact_check_outlined,
@@ -361,13 +366,14 @@ class DashboardScreen extends ConsumerWidget {
           label: 'Ver progreso',
           icon: Icons.insights,
           onTap: () {
-            if (firstPatient != null)
+            if (firstPatient != null) {
               context.go('/terapeuta/progreso/${firstPatient.id}');
+            }
           },
         ),
         if (data.pacientes.isNotEmpty)
           _QuickAccessButton(
-            label: 'Validación IA',
+            label: 'Validacion clinica',
             icon: Icons.verified_outlined,
             onTap: () =>
                 context.go('/terapeuta/validacion/${data.pacientes.first.id}'),
@@ -406,7 +412,7 @@ class DashboardScreen extends ConsumerWidget {
         width: w,
         margin: const EdgeInsets.only(bottom: 8),
         decoration: BoxDecoration(
-          color: _kBorder.withOpacity(0.5),
+          color: _kBorder.withValues(alpha: 0.5),
           borderRadius: BorderRadius.circular(16),
         ),
       );
@@ -525,7 +531,7 @@ class _MetricCard extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: accent.withOpacity(0.1),
+              color: accent.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Icon(icon, color: accent, size: 20),
@@ -580,7 +586,7 @@ class _QuickAccessButton extends StatelessWidget {
           borderRadius: BorderRadius.circular(100),
           boxShadow: [
             BoxShadow(
-              color: _kAction.withOpacity(0.3),
+              color: _kAction.withValues(alpha: 0.3),
               blurRadius: 12,
               offset: const Offset(0, 4),
             )
@@ -630,7 +636,7 @@ class _PacienteCard extends ConsumerWidget {
           // Avatar
           CircleAvatar(
             radius: 28,
-            backgroundColor: _kAction.withOpacity(0.4),
+            backgroundColor: _kAction.withValues(alpha: 0.4),
             child: Text(
               paciente.nombre.substring(0, 1).toUpperCase(),
               style: const TextStyle(
@@ -717,7 +723,7 @@ class _PacienteCard extends ConsumerWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: _kBorder.withOpacity(0.5),
+        color: _kBorder.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(100),
       ),
       child: Text(
