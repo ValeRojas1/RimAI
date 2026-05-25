@@ -5,5 +5,5 @@ class ApiConstants {
   // - Dispositivo físico en la misma red Wi-Fi: usa la IP de tu PC, ej. 'http://192.168.1.4:8000'
   //
   // MODO ACTUAL: USB + ADB Reverse (más confiable, no depende de Wi-Fi ni firewall)
-  static const String baseUrl = 'http://localhost:8000';
+  static const String baseUrl = 'https://fastapi-production-4c60.up.railway.app';
 }
