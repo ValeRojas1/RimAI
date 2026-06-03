@@ -26,19 +26,21 @@ class _EjecucionActividadScreenState extends State<EjecucionActividadScreen> {
   int _tiempo = 300; // 5 minutos por defecto
   int _apoyo = 0; // Independiente
   bool _completada = true;
-  List<String> _detonantes = [];
 
   void _guardarActividad() async {
+    final now = DateTime.now();
     final actividad = ActividadLocal(
-      patientId: 1, // Mock
-      actividadId: "ACT-001",
-      planId: 1,
-      tiempoEmpleadoSegundos: _tiempo,
-      nivelApoyoRequerido: _apoyo,
+      id: 'local-${now.microsecondsSinceEpoch}',
+      ninoId: '1',
+      planId: '1',
+      actividadId: 'ACT-001',
+      aciertos: _completada ? 1 : 0,
+      repeticiones: 1,
+      tiempoRespuestaSegundos: _tiempo,
+      nivelAyudaRequerido: _apoyo,
+      nivelDificultadUsado: 'Medio',
       observaciones: _obsController.text,
-      detonantesPresentados: _detonantes,
-      completada: _completada,
-      timestampLocal: DateTime.now(),
+      timestampLocal: now,
     );
 
     await widget.registrarUsecase.execute(actividad);
