@@ -27,12 +27,38 @@ class SCQRequest(BaseModel):
 
 
 def _score_scq(respuestas: List[int]) -> tuple[int, str]:
-    if not respuestas:
-        raise ValueError("Debe responder todos los items del cuestionario SCQ.")
+    if len(respuestas) != 40:
+        raise ValueError("Debe responder exactamente las 40 preguntas del cuestionario SCQ.")
     if not all(r in (0, 1) for r in respuestas):
         raise ValueError("Las respuestas del SCQ deben ser 0 o 1.")
 
-    puntaje_total = sum(respuestas)
+    # Pregunta 1 (índice 0) es la pregunta filtro (gateway) y no se suma al puntaje
+    habla_frases = respuestas[0] == 1
+
+    # Preguntas que suman 1 punto si la respuesta es 'No' (valor 0)
+    # 1-based: Q2, Q9, Q19, Q20 a Q40
+    # 0-based indices: 1, 8, 18, y 19 a 39
+    indices_no_scores_1 = {1, 8} | set(range(18, 40))
+
+    # Preguntas que suman 1 punto si la respuesta es 'Sí' (valor 1)
+    # 1-based: Q3 a Q8, Q10 a Q18
+    # 0-based indices: 2 a 7, 9 a 17
+    indices_yes_scores_1 = set(range(2, 8)) | set(range(9, 18))
+
+    puntaje_total = 0
+    for i in range(1, 40):
+        # Si el niño no habla con frases cortas (Q1 = No), se omiten las preguntas 2 a 7 (índices 1 a 6)
+        if not habla_frases and 1 <= i <= 6:
+            continue
+
+        val = respuestas[i]
+        if i in indices_no_scores_1:
+            if val == 0:
+                puntaje_total += 1
+        elif i in indices_yes_scores_1:
+            if val == 1:
+                puntaje_total += 1
+
     if puntaje_total >= 15:
         return puntaje_total, "Alto"
     if puntaje_total >= 11:

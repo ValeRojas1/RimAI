@@ -1,9 +1,13 @@
 import 'dart:convert';
 
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:uuid/uuid.dart';
 
+import 'package:rimai_app/adapters/output/sqlite_db_repository.dart';
 import 'package:rimai_app/core/providers/dashboard_providers.dart';
+import 'package:rimai_app/domain/entities/actividad_local.dart';
 
 Map<String, dynamic> _toMap(dynamic raw) {
   if (raw is Map<String, dynamic>) return raw;
@@ -230,22 +234,134 @@ class IAAssistantData {
   }
 }
 
+class MetricaHabilidadProgreso {
+  final String habilidad;
+  final int sesiones;
+  final int actividades;
+  final double tasaAciertos;
+  final double promedioTiempo;
+  final double promedioAyuda;
+  final double cumplimiento;
+
+  MetricaHabilidadProgreso({
+    required this.habilidad,
+    required this.sesiones,
+    required this.actividades,
+    required this.tasaAciertos,
+    required this.promedioTiempo,
+    required this.promedioAyuda,
+    required this.cumplimiento,
+  });
+
+  factory MetricaHabilidadProgreso.fromJson(dynamic raw) {
+    final j = _toMap(raw);
+    return MetricaHabilidadProgreso(
+      habilidad: j['habilidad']?.toString() ?? 'Sin categoria',
+      sesiones: (j['sesiones'] as num?)?.toInt() ?? 0,
+      actividades: (j['actividades'] as num?)?.toInt() ?? 0,
+      tasaAciertos: (j['tasa_aciertos'] as num?)?.toDouble() ?? 0,
+      promedioTiempo: (j['promedio_tiempo'] as num?)?.toDouble() ?? 0,
+      promedioAyuda: (j['promedio_ayuda'] as num?)?.toDouble() ?? 0,
+      cumplimiento: (j['cumplimiento'] as num?)?.toDouble() ?? 0,
+    );
+  }
+}
+
+class SesionProgreso {
+  final String sesionId;
+  final int sesionNumero;
+  final String planId;
+  final DateTime? fecha;
+  final double tasaAciertos;
+  final int totalAciertos;
+  final int totalIntentos;
+  final double promedioTiempo;
+  final double promedioAyuda;
+  final double cumplimiento;
+  final List<MetricaHabilidadProgreso> habilidades;
+
+  SesionProgreso({
+    required this.sesionId,
+    required this.sesionNumero,
+    required this.planId,
+    this.fecha,
+    required this.tasaAciertos,
+    required this.totalAciertos,
+    required this.totalIntentos,
+    required this.promedioTiempo,
+    required this.promedioAyuda,
+    required this.cumplimiento,
+    required this.habilidades,
+  });
+
+  factory SesionProgreso.fromJson(dynamic raw) {
+    final j = _toMap(raw);
+    return SesionProgreso(
+      sesionId: j['sesion_id']?.toString() ?? '',
+      sesionNumero: (j['sesion_numero'] as num?)?.toInt() ?? 0,
+      planId: j['plan_id']?.toString() ?? '',
+      fecha: DateTime.tryParse(j['fecha']?.toString() ?? ''),
+      tasaAciertos: (j['tasa_aciertos'] as num?)?.toDouble() ?? 0,
+      totalAciertos: (j['total_aciertos'] as num?)?.toInt() ?? 0,
+      totalIntentos: (j['total_intentos'] as num?)?.toInt() ?? 0,
+      promedioTiempo: (j['promedio_tiempo'] as num?)?.toDouble() ?? 0,
+      promedioAyuda: (j['promedio_ayuda'] as num?)?.toDouble() ?? 0,
+      cumplimiento: (j['cumplimiento'] as num?)?.toDouble() ?? 0,
+      habilidades: j['habilidades'] is List
+          ? (j['habilidades'] as List)
+              .map((e) => MetricaHabilidadProgreso.fromJson(e))
+              .toList()
+          : [],
+    );
+  }
+}
+
+class ObservacionProgreso {
+  final String actividad;
+  final String observacion;
+  final DateTime? fecha;
+
+  ObservacionProgreso({
+    required this.actividad,
+    required this.observacion,
+    this.fecha,
+  });
+
+  factory ObservacionProgreso.fromJson(dynamic raw) {
+    final j = _toMap(raw);
+    return ObservacionProgreso(
+      actividad: j['actividad']?.toString() ?? 'Actividad',
+      observacion: j['observacion']?.toString() ?? '',
+      fecha: DateTime.tryParse(j['fecha']?.toString() ?? ''),
+    );
+  }
+}
+
 class MetricasProgreso {
+  final String periodo;
   final int sesionesCompletadas;
   final double tasaAciertos;
   final double adherencia;
   final List<double> historiaAciertos;
+  final List<MetricaHabilidadProgreso> metricasPorHabilidad;
+  final List<SesionProgreso> sesiones;
+  final List<ObservacionProgreso> observacionesRecientes;
 
   MetricasProgreso({
+    this.periodo = 'Esta semana',
     required this.sesionesCompletadas,
     required this.tasaAciertos,
     required this.adherencia,
     required this.historiaAciertos,
+    this.metricasPorHabilidad = const [],
+    this.sesiones = const [],
+    this.observacionesRecientes = const [],
   });
 
   factory MetricasProgreso.fromJson(dynamic raw) {
     final j = _toMap(raw);
     return MetricasProgreso(
+      periodo: j['periodo']?.toString() ?? 'Esta semana',
       sesionesCompletadas: (j['sesiones_completadas'] as num?)?.toInt() ?? 0,
       tasaAciertos: (j['tasa_aciertos'] as num?)?.toDouble() ?? 0,
       adherencia: (j['adherencia'] as num?)?.toDouble() ?? 0,
@@ -254,6 +370,21 @@ class MetricasProgreso {
               .map((e) => (e as num).toDouble())
               .toList()
           : [0],
+      metricasPorHabilidad: j['metricas_por_habilidad'] is List
+          ? (j['metricas_por_habilidad'] as List)
+              .map((e) => MetricaHabilidadProgreso.fromJson(e))
+              .toList()
+          : [],
+      sesiones: j['sesiones'] is List
+          ? (j['sesiones'] as List)
+              .map((e) => SesionProgreso.fromJson(e))
+              .toList()
+          : [],
+      observacionesRecientes: j['observaciones_recientes'] is List
+          ? (j['observaciones_recientes'] as List)
+              .map((e) => ObservacionProgreso.fromJson(e))
+              .toList()
+          : [],
     );
   }
 }
@@ -502,8 +633,10 @@ class IAService {
 }
 
 class SesionService {
-  SesionService(this._dio);
+  SesionService(this._dio, this._localDb);
   final Dio _dio;
+  final SqliteDbRepository _localDb;
+  final Uuid _uuid = const Uuid();
 
   Future<Map<String, dynamic>> guardarResultadoActividad({
     required String ninoId,
@@ -516,35 +649,42 @@ class SesionService {
     required String nivelDificultadUsado,
     String? observaciones,
   }) async {
+    final actividadLocal = ActividadLocal(
+      id: _uuid.v4(),
+      ninoId: ninoId,
+      planId: planId,
+      actividadId: actividadId,
+      aciertos: aciertos,
+      repeticiones: intentos,
+      tiempoRespuestaSegundos: segundos,
+      nivelAyudaRequerido: _mapNivelAyuda(nivelAyuda),
+      nivelDificultadUsado: nivelDificultadUsado,
+      observaciones: observaciones,
+      timestampLocal: DateTime.now(),
+    );
+
     try {
+      if (!await _hasConnectivity()) {
+        await _localDb.saveActividad(actividadLocal);
+        return _offlineResult(actividadLocal);
+      }
+      await sincronizarPendientes();
       final response = await _dio.post('/api/sesiones',
-          data: {
-            'nino_id': ninoId,
-            'plan_id': planId,
-            'resultados': [
-              {
-                'actividad_id': actividadId,
-                'aciertos': aciertos,
-                'repeticiones': intentos,
-                'tiempo_respuesta': segundos.toDouble(),
-                'nivel_ayuda_requerido': {
-                      'Ninguna': 0,
-                      'Verbal': 1,
-                      'Fisica': 2,
-                      'Física': 2
-                    }[nivelAyuda] ??
-                    0,
-                'nivel_dificultad_usado': nivelDificultadUsado,
-                'observaciones': observaciones,
-              }
-            ],
-          },
+          data: actividadLocal.toSesionPayload(),
           options: Options(
             sendTimeout: const Duration(seconds: 30),
             receiveTimeout: const Duration(seconds: 30),
           ));
-      return (response.data as Map).cast<String, dynamic>();
+      return {
+        ...(response.data as Map).cast<String, dynamic>(),
+        'pendiente_sync': false,
+        'client_event_id': actividadLocal.id,
+      };
     } on DioException catch (e) {
+      if (_isNetworkFailure(e)) {
+        await _localDb.saveActividad(actividadLocal);
+        return _offlineResult(actividadLocal);
+      }
       final data = e.response?.data;
       final detail = data is Map ? data['detail'] : null;
       if (detail is Map) {
@@ -558,6 +698,62 @@ class SesionService {
         'No se pudo guardar la actividad.',
       );
     }
+  }
+
+  Future<void> sincronizarPendientes() async {
+    final pendientes = await _localDb.getActividadesPendientes();
+    if (pendientes.isEmpty) return;
+
+    final syncedIds = <String>[];
+    for (final pendiente in pendientes) {
+      try {
+        await _dio.post('/api/sesiones', data: pendiente.toSesionPayload());
+        syncedIds.add(pendiente.id);
+      } on DioException catch (e) {
+        if (_isNetworkFailure(e)) break;
+      }
+    }
+    await _localDb.deleteActividades(syncedIds);
+  }
+
+  Future<bool> _hasConnectivity() async {
+    final results = await Connectivity().checkConnectivity();
+    return results.any((result) => result != ConnectivityResult.none);
+  }
+
+  bool _isNetworkFailure(DioException e) {
+    return e.response == null ||
+        e.type == DioExceptionType.connectionError ||
+        e.type == DioExceptionType.connectionTimeout ||
+        e.type == DioExceptionType.sendTimeout ||
+        e.type == DioExceptionType.receiveTimeout;
+  }
+
+  int _mapNivelAyuda(String nivelAyuda) {
+    return {
+          'Ninguna': 0,
+          'Verbal': 1,
+          'Fisica': 2,
+          'Física': 2,
+        }[nivelAyuda] ??
+        0;
+  }
+
+  Map<String, dynamic> _offlineResult(ActividadLocal actividadLocal) {
+    return {
+      'ok': true,
+      'pendiente_sync': true,
+      'sesion_id': actividadLocal.id,
+      'client_event_id': actividadLocal.id,
+      'total_aciertos': actividadLocal.aciertos,
+      'total_intentos': actividadLocal.repeticiones,
+      'tasa_aciertos': actividadLocal.repeticiones > 0
+          ? actividadLocal.aciertos / actividadLocal.repeticiones
+          : 0,
+      'nivel_dificultad_recomendado':
+          actividadLocal.nivelDificultadUsado,
+      'ajustes_dificultad': [],
+    };
   }
 
   Future<void> solicitarAjusteDificultad({
@@ -618,8 +814,12 @@ class AjustarDificultadUseCase {
 final perfilServiceProvider =
     Provider((ref) => PerfilService(ref.read(dioProvider)));
 final iaServiceProvider = Provider((ref) => IAService(ref.read(dioProvider)));
+final sqliteDbRepositoryProvider = Provider((ref) => SqliteDbRepository());
 final sesionServiceProvider =
-    Provider((ref) => SesionService(ref.read(dioProvider)));
+    Provider((ref) => SesionService(
+          ref.read(dioProvider),
+          ref.read(sqliteDbRepositoryProvider),
+        ));
 final indicadoresProgresoProvider =
     Provider((ref) => IndicadoresProgresoService(ref.read(dioProvider)));
 final ajustarDificultadProvider = Provider((ref) => AjustarDificultadUseCase());
@@ -659,10 +859,11 @@ final nivelInicialProvider = FutureProvider.family<NivelInicialData,
 });
 
 final metricasProgresoFutureProvider =
-    FutureProvider.family<MetricasProgreso, String>((ref, ninoId) {
+    FutureProvider.family<MetricasProgreso,
+        ({String ninoId, String periodo})>((ref, args) {
   return ref
       .read(indicadoresProgresoProvider)
-      .obtenerMetricas(ninoId, 'Esta semana');
+      .obtenerMetricas(args.ninoId, args.periodo);
 });
 
 class RegistrarDecisionClinicaUseCase {

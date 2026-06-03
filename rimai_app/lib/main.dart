@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 
 import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
@@ -26,9 +27,14 @@ void main() async {
   );
   final syncUsecase = SyncOfflineUsecase(localDb, apiSyncRepo);
 
-  // NOTA: Aquí se podría integrar connectivity_plus para disparar syncUsecase.execute()
-  // al detectar red en onConnectivityChanged.listen(...)
   syncUsecase.execute(); // Intento inicial al abrir la app
+  Connectivity().onConnectivityChanged.listen((results) {
+    final hasConnection =
+        results.any((result) => result != ConnectivityResult.none);
+    if (hasConnection) {
+      syncUsecase.execute();
+    }
+  });
 
   runApp(
     const ProviderScope(

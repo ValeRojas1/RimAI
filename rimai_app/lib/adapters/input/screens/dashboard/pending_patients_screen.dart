@@ -3,8 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:rimai_app/core/providers/dashboard_providers.dart';
+import 'package:rimai_app/core/utils/clinical_document_utils.dart';
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const _kP = Color(0xFFA43714);
@@ -510,9 +510,9 @@ class _DetailSheetState extends ConsumerState<_DetailSheet> {
           style: GoogleFonts.plusJakartaSans(fontSize: 13, color: _kSub)));
     } else {
       docs.forEach((k, v) {
-        if (v != null && v.toString().isNotEmpty) {
-          final docUrl = v.toString();
-          dWidgets.add(Container(
+        final info = ClinicalDocumentUtils.parse(k, v);
+        if (info == null) return;
+        dWidgets.add(Container(
             margin: const EdgeInsets.only(bottom: 10),
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
@@ -540,30 +540,25 @@ class _DetailSheetState extends ConsumerState<_DetailSheet> {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        'Documento PDF',
+                        info.fileName,
                         style: GoogleFonts.plusJakartaSans(
                           fontSize: 10,
                           color: _kSub,
                         ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ],
                   ),
                 ),
                 ElevatedButton(
-                  onPressed: () async {
-                    final uri = Uri.parse(docUrl);
-                    if (await canLaunchUrl(uri)) {
-                      await launchUrl(uri, mode: LaunchMode.externalApplication);
-                    } else {
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('No se pudo abrir el enlace: $docUrl'),
-                            backgroundColor: Colors.red.shade800,
-                          ),
-                        );
-                      }
-                    }
+                  onPressed: () {
+                    context.push(
+                      '/terapeuta/documento',
+                      extra: info.copyWith(
+                        title: ClinicalDocumentUtils.documentTypeLabel(k),
+                      ),
+                    );
                   },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: _kP,
@@ -583,7 +578,6 @@ class _DetailSheetState extends ConsumerState<_DetailSheet> {
               ],
             ),
           ));
-        }
       });
     }
 

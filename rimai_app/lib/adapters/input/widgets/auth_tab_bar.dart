@@ -78,7 +78,7 @@ class _RimAIAuthTabBarState extends State<RimAIAuthTabBar> {
           children: [
             // ── Píldora blanca deslizante ──────────────────────────────
             AnimatedAlign(
-              duration: const Duration(milliseconds: 550),
+              duration: const Duration(milliseconds: 480),
               curve: Curves.easeOutCubic,
               alignment: _currentTab == AuthTab.login
                   ? Alignment.centerLeft

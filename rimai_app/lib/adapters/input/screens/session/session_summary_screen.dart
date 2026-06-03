@@ -28,6 +28,7 @@ class SessionSummaryScreen extends ConsumerStatefulWidget {
   final String? nivelDificultadRecomendado;
   final List<Map<String, dynamic>> ajustesDificultad;
   final bool permitirAplicarSugerencia;
+  final bool pendienteSync;
 
   const SessionSummaryScreen({
     super.key,
@@ -44,6 +45,7 @@ class SessionSummaryScreen extends ConsumerStatefulWidget {
     this.nivelDificultadRecomendado,
     this.ajustesDificultad = const [],
     this.permitirAplicarSugerencia = true,
+    this.pendienteSync = false,
   });
 
   @override
@@ -160,6 +162,29 @@ class _SessionSummaryScreenState extends ConsumerState<SessionSummaryScreen> {
               ),
             ),
             const SizedBox(height: 32),
+            if (widget.pendienteSync) ...[
+              const BentoCard(
+                backgroundColor: Color(0xFFFFF2CC),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.cloud_off_outlined, color: Color(0xFF6B4300)),
+                    SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        'Guardado localmente. Se sincronizara automaticamente cuando vuelva la conexion.',
+                        style: TextStyle(
+                          color: Color(0xFF6B4300),
+                          fontWeight: FontWeight.bold,
+                          height: 1.35,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 24),
+            ],
 
             // ── Score principal ─────────────────────────────────────────────
             BentoCard(

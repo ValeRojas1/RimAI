@@ -1,17 +1,14 @@
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:url_launcher/url_launcher.dart';
-
 import 'package:rimai_app/adapters/input/widgets/rimai_top_bar.dart';
 import 'package:rimai_app/adapters/input/widgets/bento_card.dart';
 import 'package:rimai_app/adapters/input/widgets/tag_chip.dart';
 import 'package:rimai_app/adapters/input/widgets/interest_card.dart';
-import 'package:rimai_app/core/constants/api_constants.dart';
 import 'package:rimai_app/core/providers/pmv2_providers.dart';
+import 'package:rimai_app/core/utils/clinical_document_utils.dart';
 import 'package:rimai_app/core/providers/dashboard_providers.dart';
 
 class TherapeuticProfileScreen extends ConsumerStatefulWidget {
@@ -638,75 +635,30 @@ class _TherapeuticProfileScreenState
     );
   }
 
-  String _documentLabel(dynamic value) {
-    if (value is Map) {
-      return value['nombre']?.toString() ?? value.toString();
-    }
-    return value?.toString() ?? 'archivo';
-  }
+  String _documentLabel(dynamic value) =>
+      ClinicalDocumentUtils.documentLabel(value);
 
-  String? _documentUrl(dynamic value) {
-    if (value is Map) {
-      final raw = value['url'] ?? value['download_url'] ?? value['path'];
-      final url = raw?.toString();
-      return url == null || url.isEmpty ? null : url;
-    }
-    final raw = value?.toString();
-    if (raw == null || raw.isEmpty) return null;
-    return raw;
-  }
+  String? _documentUrl(dynamic value) =>
+      ClinicalDocumentUtils.documentUrl(value);
 
-  String _absoluteDocumentUrl(String url) {
-    if (url.startsWith('http://') || url.startsWith('https://')) return url;
-    final base = ApiConstants.baseUrl.replaceAll(RegExp(r'/$'), '');
-    final path = url.startsWith('/') ? url : '/$url';
-    return '$base$path';
-  }
+  String _documentType(String key) =>
+      ClinicalDocumentUtils.documentTypeLabel(key);
 
-  String _safeFileName(String label, String url) {
-    final uriName = Uri.tryParse(url)?.pathSegments.last;
-    final raw = (uriName?.isNotEmpty == true ? uriName : label)
-        ?.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_')
-        .replaceAll(' ', '_');
-    return raw == null || raw.isEmpty ? 'documento_clinico' : raw;
-  }
-
-  String _documentType(String key) => switch (key) {
-        'evaluacion_profesional' => 'Evaluacion profesional',
-        'plan_terapeutico_previo' => 'Plan terapeutico previo',
-        'medicacion' => 'Documento de medicacion',
-        _ => key.replaceAll('_', ' '),
-      };
-
-  Future<void> _openDocument(String url, String label) async {
-    final absoluteUrl = _absoluteDocumentUrl(url);
-    final uri = Uri.tryParse(absoluteUrl);
-    if (uri == null) {
+  void _openDocument(String docKey, dynamic value) {
+    final info = ClinicalDocumentUtils.parse(docKey, value);
+    if (info == null) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('El enlace del documento no es valido.')),
+        const SnackBar(
+          content: Text('Archivo registrado sin enlace disponible.'),
+        ),
       );
       return;
     }
-    try {
-      final filename = _safeFileName(label, absoluteUrl);
-      final target = File(
-          '${Directory.systemTemp.path}${Platform.pathSeparator}$filename');
-      await ref.read(dioProvider).download(absoluteUrl, target.path);
-      final opened = await launchUrl(
-        Uri.file(target.path),
-        mode: LaunchMode.externalApplication,
-      );
-      if (!opened && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No se pudo abrir el documento.')),
-        );
-      }
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('No se pudo descargar el documento: $e')),
-      );
-    }
+    context.push(
+      '/terapeuta/documento',
+      extra: info.copyWith(title: _documentType(docKey)),
+    );
   }
 
   Widget _documentsSection(List<MapEntry<String, dynamic>> docs) {
@@ -782,8 +734,9 @@ class _TherapeuticProfileScreenState
                   const SizedBox(width: 8),
                   IconButton.filledTonal(
                     tooltip: 'Abrir documento',
-                    onPressed:
-                        url == null ? null : () => _openDocument(url, label),
+                    onPressed: url == null
+                        ? null
+                        : () => _openDocument(entry.key, entry.value),
                     icon: const Icon(Icons.open_in_new, size: 18),
                   ),
                 ],

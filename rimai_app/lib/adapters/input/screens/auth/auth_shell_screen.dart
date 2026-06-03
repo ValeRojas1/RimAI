@@ -95,14 +95,77 @@ class AuthShellScreen extends StatelessWidget {
             onLoginTap: () => context.go('/auth/login'),
             onRegisterTap: () => context.go('/auth/register'),
           ),
-          // Usamos AnimatedSize para que la carta cambie de altura suavemente
-          // ya que el formulario de Registro es más alto que el de Login.
+          // AnimatedSize + slide horizontal: la carta crece/encoge y el formulario
+          // se desliza como un bloque al cambiar entre login y registro.
           AnimatedSize(
-            duration: const Duration(milliseconds: 550),
+            duration: const Duration(milliseconds: 480),
             curve: Curves.easeInOutCubic,
-            child: child,
+            alignment: Alignment.topCenter,
+            clipBehavior: Clip.hardEdge,
+            child: _AuthFormSwitcher(
+              activeTab: activeTab,
+              child: child,
+            ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Desliza el formulario activo horizontalmente, como una transición de página.
+class _AuthFormSwitcher extends StatelessWidget {
+  static const _duration = Duration(milliseconds: 480);
+
+  final AuthTab activeTab;
+  final Widget child;
+
+  const _AuthFormSwitcher({
+    required this.activeTab,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedSwitcher(
+      duration: _duration,
+      switchInCurve: Curves.easeOutCubic,
+      switchOutCurve: Curves.easeInCubic,
+      layoutBuilder: (currentChild, previousChildren) {
+        return Stack(
+          alignment: Alignment.topCenter,
+          clipBehavior: Clip.hardEdge,
+          children: [
+            ...previousChildren,
+            if (currentChild != null) currentChild,
+          ],
+        );
+      },
+      transitionBuilder: (child, animation) {
+        final tab = (child.key as ValueKey<AuthTab>).value;
+        final fromRight = tab == AuthTab.register;
+        final slideOffset = Tween<Offset>(
+          begin: Offset(fromRight ? 0.18 : -0.18, 0),
+          end: Offset.zero,
+        ).animate(CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutCubic,
+          reverseCurve: Curves.easeInCubic,
+        ));
+
+        return ClipRect(
+          child: FadeTransition(
+            opacity: animation,
+            child: SlideTransition(
+              position: slideOffset,
+              child: child,
+            ),
+          ),
+        );
+      },
+      child: KeyedSubtree(
+        key: ValueKey(activeTab),
+        child: child,
       ),
     );
   }

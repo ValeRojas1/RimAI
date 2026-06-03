@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -33,6 +34,11 @@ List<String> _stringList(dynamic raw) {
   return [];
 }
 
+double _numDouble(dynamic raw) {
+  if (raw is num) return raw.toDouble();
+  return double.tryParse(raw?.toString() ?? '') ?? 0;
+}
+
 class UltimaSesion {
   final DateTime? fecha;
   final double? tasaAciertos;
@@ -53,6 +59,98 @@ class UltimaSesion {
   }
 }
 
+class ProgresoFamiliar {
+  final String periodo;
+  final int sesionesCompletadas;
+  final int actividadesRegistradas;
+  final double tasaAciertos;
+  final double cumplimiento;
+  final double promedioAyuda;
+  final double promedioTiempoSegundos;
+
+  const ProgresoFamiliar({
+    this.periodo = 'ultimos_30_dias',
+    this.sesionesCompletadas = 0,
+    this.actividadesRegistradas = 0,
+    this.tasaAciertos = 0,
+    this.cumplimiento = 0,
+    this.promedioAyuda = 0,
+    this.promedioTiempoSegundos = 0,
+  });
+
+  factory ProgresoFamiliar.fromJson(dynamic raw) {
+    final j = _optionalMap(raw);
+    return ProgresoFamiliar(
+      periodo: j['periodo']?.toString() ?? 'ultimos_30_dias',
+      sesionesCompletadas:
+          (j['sesiones_completadas'] as num?)?.toInt() ?? 0,
+      actividadesRegistradas:
+          (j['actividades_registradas'] as num?)?.toInt() ?? 0,
+      tasaAciertos: _numDouble(j['tasa_aciertos']),
+      cumplimiento: _numDouble(j['cumplimiento']),
+      promedioAyuda: _numDouble(j['promedio_ayuda']),
+      promedioTiempoSegundos: _numDouble(j['promedio_tiempo_segundos']),
+    );
+  }
+}
+
+class RiesgoAbandono {
+  final String nivel;
+  final int score;
+  final int umbralInactividadDias;
+  final int diasSinActividad;
+  final int sesiones14Dias;
+  final int sesiones30Dias;
+  final int sesionesInterrumpidas30Dias;
+  final double tasaInterrupcion30Dias;
+  final int actividadesPlan;
+  final int actividadesPendientes;
+  final double proporcionActividadesPendientes;
+  final List<String> factores;
+  final String notaClinica;
+
+  const RiesgoAbandono({
+    this.nivel = 'bajo',
+    this.score = 0,
+    this.umbralInactividadDias = 7,
+    this.diasSinActividad = 0,
+    this.sesiones14Dias = 0,
+    this.sesiones30Dias = 0,
+    this.sesionesInterrumpidas30Dias = 0,
+    this.tasaInterrupcion30Dias = 0,
+    this.actividadesPlan = 0,
+    this.actividadesPendientes = 0,
+    this.proporcionActividadesPendientes = 0,
+    this.factores = const [],
+    this.notaClinica =
+        'Herramienta de apoyo clinico; no constituye diagnostico.',
+  });
+
+  factory RiesgoAbandono.fromJson(dynamic raw) {
+    final j = _optionalMap(raw);
+    return RiesgoAbandono(
+      nivel: j['nivel']?.toString() ?? 'bajo',
+      score: (j['score'] as num?)?.toInt() ?? 0,
+      umbralInactividadDias:
+          (j['umbral_inactividad_dias'] as num?)?.toInt() ?? 7,
+      diasSinActividad: (j['dias_sin_actividad'] as num?)?.toInt() ?? 0,
+      sesiones14Dias: (j['sesiones_14_dias'] as num?)?.toInt() ?? 0,
+      sesiones30Dias: (j['sesiones_30_dias'] as num?)?.toInt() ?? 0,
+      sesionesInterrumpidas30Dias:
+          (j['sesiones_interrumpidas_30_dias'] as num?)?.toInt() ?? 0,
+      tasaInterrupcion30Dias: _numDouble(j['tasa_interrupcion_30_dias']),
+      actividadesPlan: (j['actividades_plan'] as num?)?.toInt() ?? 0,
+      actividadesPendientes:
+          (j['actividades_pendientes'] as num?)?.toInt() ?? 0,
+      proporcionActividadesPendientes:
+          _numDouble(j['proporcion_actividades_pendientes']),
+      factores: _stringList(j['factores']),
+      notaClinica: j['nota_clinica']?.toString() ??
+          'Herramienta de apoyo clinico; no constituye diagnostico.',
+    );
+  }
+}
+
 class PacienteDashboard {
   final String id;
   final String nombre;
@@ -64,6 +162,10 @@ class PacienteDashboard {
   final String? planActivoId;
   final String? planEstado;
   final UltimaSesion? ultimaSesion;
+  final ProgresoFamiliar progreso;
+  final RiesgoAbandono riesgoAbandono;
+  final List<String> recomendacionesActivas;
+  final List<String> alertas;
   final String estadoClinico;
   final Map<String, dynamic> hitos;
   final Map<String, dynamic> sensorial;
@@ -89,6 +191,10 @@ class PacienteDashboard {
     this.planActivoId,
     this.planEstado,
     this.ultimaSesion,
+    this.progreso = const ProgresoFamiliar(),
+    this.riesgoAbandono = const RiesgoAbandono(),
+    this.recomendacionesActivas = const [],
+    this.alertas = const [],
     this.estadoClinico = 'pendiente_asignacion',
     this.hitos = const {},
     this.sensorial = const {},
@@ -119,6 +225,10 @@ class PacienteDashboard {
       ultimaSesion: j['ultima_sesion'] != null
           ? UltimaSesion.fromJson(j['ultima_sesion'])
           : null,
+      progreso: ProgresoFamiliar.fromJson(j['progreso']),
+      riesgoAbandono: RiesgoAbandono.fromJson(j['riesgo_abandono']),
+      recomendacionesActivas: _stringList(j['recomendaciones_activas']),
+      alertas: _stringList(j['alertas']),
       estadoClinico: j['estado_clinico']?.toString() ?? 'pendiente_asignacion',
       hitos: _optionalMap(j['hitos']),
       sensorial: _optionalMap(j['sensorial']),
@@ -254,6 +364,7 @@ class ActividadPlan {
   final String nivelCatalogo;
   final int? duracionEstimada;
   final List<String> materiales;
+  final List<String> recomendacionesAdaptadas;
   final String modoEjecucion;
   final bool requiereAcompanamiento;
   final bool completada;
@@ -267,6 +378,7 @@ class ActividadPlan {
     this.nivelCatalogo = 'Medio',
     this.duracionEstimada,
     this.materiales = const [],
+    this.recomendacionesAdaptadas = const [],
     this.modoEjecucion = 'acompanada',
     this.requiereAcompanamiento = true,
     this.completada = false,
@@ -285,6 +397,7 @@ class ActividadPlan {
           'Medio',
       duracionEstimada: (j['duracion_estimada'] as num?)?.toInt(),
       materiales: _stringList(j['materiales']),
+      recomendacionesAdaptadas: _stringList(j['recomendaciones_adaptadas']),
       modoEjecucion: j['modo_ejecucion']?.toString() ?? 'acompanada',
       requiereAcompanamiento: j['requiere_acompanamiento'] != false,
       completada: j['completada'] == true,
@@ -388,6 +501,12 @@ class NotificacionData {
   final String mensaje;
   final bool leido;
   final String createdAt;
+  final String tipo;
+  final String canal;
+  final String estadoEnvio;
+  final String? entidadTipo;
+  final String? entidadId;
+  final Map<String, dynamic> payload;
 
   NotificacionData({
     required this.id,
@@ -395,6 +514,12 @@ class NotificacionData {
     required this.mensaje,
     required this.leido,
     required this.createdAt,
+    this.tipo = 'general',
+    this.canal = 'in_app',
+    this.estadoEnvio = 'registrada',
+    this.entidadTipo,
+    this.entidadId,
+    this.payload = const {},
   });
 
   factory NotificacionData.fromJson(dynamic raw) {
@@ -405,6 +530,12 @@ class NotificacionData {
       mensaje: j['mensaje']?.toString() ?? '',
       leido: j['leido'] == true,
       createdAt: j['created_at']?.toString() ?? '',
+      tipo: j['tipo']?.toString() ?? 'general',
+      canal: j['canal']?.toString() ?? 'in_app',
+      estadoEnvio: j['estado_envio']?.toString() ?? 'registrada',
+      entidadTipo: j['entidad_tipo']?.toString(),
+      entidadId: j['entidad_id']?.toString(),
+      payload: _optionalMap(j['payload']),
     );
   }
 }
@@ -427,6 +558,47 @@ class DashboardService {
   Future<PlanData> obtenerPlanActivo(String ninoId) async {
     final response = await _dio.get('/api/ninos/$ninoId/plan');
     return PlanData.fromJson(response.data);
+  }
+
+  Future<Map<String, dynamic>> generarReporteTerapeutico({
+    required String ninoId,
+    DateTime? inicio,
+    DateTime? fin,
+  }) async {
+    try {
+      final response = await _dio.get(
+        '/api/dashboard/terapeuta/ninos/$ninoId/reporte-terapeutico',
+        queryParameters: {
+          'formato': 'json',
+          if (inicio != null) 'inicio': inicio.toIso8601String(),
+          if (fin != null) 'fin': fin.toIso8601String(),
+        },
+      );
+      return (response.data as Map).cast<String, dynamic>();
+    } on DioException catch (e) {
+      throw Exception(_extractDetail(e, 'Error al generar el reporte.'));
+    }
+  }
+
+  Future<Uint8List> descargarReporteTerapeuticoPdf({
+    required String ninoId,
+    DateTime? inicio,
+    DateTime? fin,
+  }) async {
+    try {
+      final response = await _dio.get<List<int>>(
+        '/api/dashboard/terapeuta/ninos/$ninoId/reporte-terapeutico',
+        queryParameters: {
+          'formato': 'pdf',
+          if (inicio != null) 'inicio': inicio.toIso8601String(),
+          if (fin != null) 'fin': fin.toIso8601String(),
+        },
+        options: Options(responseType: ResponseType.bytes),
+      );
+      return Uint8List.fromList(response.data ?? const []);
+    } on DioException catch (e) {
+      throw Exception(_extractDetail(e, 'Error al exportar el PDF.'));
+    }
   }
 
   Future<List<ActividadCatalogo>> listarActividades({String? planId}) async {
@@ -743,6 +915,26 @@ class DashboardService {
           _extractDetail(e, 'Error al marcar notificación como leída.'));
     }
   }
+
+  Future<List<NotificacionData>> obtenerNotificacionesTerapeuta() async {
+    try {
+      final response =
+          await _dio.get('/api/dashboard/terapeuta/notificaciones');
+      final list = response.data as List? ?? [];
+      return list.map((e) => NotificacionData.fromJson(e)).toList();
+    } on DioException catch (e) {
+      throw Exception(_extractDetail(e, 'Error al obtener notificaciones.'));
+    }
+  }
+
+  Future<void> marcarNotificacionTerapeutaLeida(String id) async {
+    try {
+      await _dio.patch('/api/dashboard/terapeuta/notificaciones/$id/leer');
+    } on DioException catch (e) {
+      throw Exception(
+          _extractDetail(e, 'Error al marcar notificacion como leida.'));
+    }
+  }
 }
 
 final _secureStorageProvider2 = Provider<FlutterSecureStorage>(
@@ -812,4 +1004,9 @@ final pendientesProvider =
 final notificacionesProvider =
     FutureProvider.autoDispose<List<NotificacionData>>((ref) async {
   return ref.read(dashboardServiceProvider).obtenerNotificaciones();
+});
+
+final terapeutaNotificacionesProvider =
+    FutureProvider.autoDispose<List<NotificacionData>>((ref) async {
+  return ref.read(dashboardServiceProvider).obtenerNotificacionesTerapeuta();
 });

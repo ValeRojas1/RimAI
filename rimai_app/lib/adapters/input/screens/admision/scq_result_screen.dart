@@ -7,12 +7,13 @@ import 'package:rimai_app/core/providers/dashboard_providers.dart';
 import 'package:rimai_app/core/providers/scq_providers.dart';
 import 'package:rimai_app/domain/entities/scq_result.dart';
 
-const _kP = Color(0xFFA43714);
-const _kBg = Color(0xFFFFF8F2);
-const _kSurf = Color(0xFFFAF2E9);
-const _kText = Color(0xFF1E1B16);
-const _kSub = Color(0xFF58423B);
-const _kBdr = Color(0xFFDFC0B7);
+const _kP = Color(0xFFB8D6B2);
+const _kGreenStrong = Color(0xFF4A624D);
+const _kBg = Color(0xFFFAF9F6);
+const _kSurf = Color(0xFFF5F3EC);
+const _kText = Color(0xFF2A2825);
+const _kSub = Color(0xFF6B6661);
+const _kBdr = Color(0xFFE2E0D9);
 
 class SCQResultScreen extends ConsumerStatefulWidget {
   final SCQResult result;
@@ -79,7 +80,7 @@ class _SCQResultScreenState extends ConsumerState<SCQResultScreen> {
         title: 'Resultados SCQ',
         leadingIcon: Icons.home,
         onLeadingPressed: () => context.go('/familia/dashboard'),
-        iconColor: _kP,
+        iconColor: _kGreenStrong,
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),

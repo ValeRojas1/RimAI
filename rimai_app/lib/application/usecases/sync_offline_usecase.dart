@@ -11,14 +11,9 @@ class SyncOfflineUsecase {
     final pendientes = await localDbPort.getActividadesPendientes();
 
     if (pendientes.isNotEmpty) {
-      bool success = await syncPort.syncActividades(pendientes);
-      if (success) {
-        // Obtenemos los IDs y los borramos o marcamos como sincronizados
-        final ids = pendientes
-            .map((actividad) => actividad.id)
-            .whereType<String>()
-            .toList();
-        await localDbPort.deleteActividades(ids);
+      final syncedIds = await syncPort.syncActividades(pendientes);
+      if (syncedIds.isNotEmpty) {
+        await localDbPort.deleteActividades(syncedIds);
       }
     }
   }

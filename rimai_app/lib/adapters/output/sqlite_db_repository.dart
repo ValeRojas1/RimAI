@@ -1,12 +1,11 @@
-import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
-import 'package:uuid/uuid.dart';
-import '../../domain/entities/actividad_local.dart';
+import 'package:sqflite/sqflite.dart';
+
 import '../../application/ports/local_db_port.dart';
+import '../../domain/entities/actividad_local.dart';
 
 class SqliteDbRepository implements ILocalDbPort {
   static Database? _database;
-  final _uuid = const Uuid();
 
   Future<Database> get database async {
     if (_database != null) return _database!;
@@ -18,16 +17,24 @@ class SqliteDbRepository implements ILocalDbPort {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, filePath);
 
-    return await openDatabase(
+    return openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: _createDB,
+      onUpgrade: (db, oldVersion, newVersion) async {
+        await _createPendingSessionsTable(db);
+      },
     );
   }
 
-  Future _createDB(Database db, int version) async {
+  Future<void> _createDB(Database db, int version) async {
+    await _createLegacyActivitiesTable(db);
+    await _createPendingSessionsTable(db);
+  }
+
+  Future<void> _createLegacyActivitiesTable(Database db) async {
     await db.execute('''
-    CREATE TABLE actividades_pendientes (
+    CREATE TABLE IF NOT EXISTS actividades_pendientes (
       id TEXT PRIMARY KEY,
       patient_id INTEGER,
       actividad_id TEXT,
@@ -42,63 +49,60 @@ class SqliteDbRepository implements ILocalDbPort {
     ''');
   }
 
+  Future<void> _createPendingSessionsTable(Database db) async {
+    await db.execute('''
+    CREATE TABLE IF NOT EXISTS sesiones_pendientes_sync (
+      id TEXT PRIMARY KEY,
+      nino_id TEXT NOT NULL,
+      plan_id TEXT NOT NULL,
+      actividad_id TEXT NOT NULL,
+      aciertos INTEGER NOT NULL,
+      repeticiones INTEGER NOT NULL,
+      tiempo_respuesta_segundos INTEGER NOT NULL,
+      nivel_ayuda_requerido INTEGER NOT NULL,
+      nivel_dificultad_usado TEXT NOT NULL,
+      observaciones TEXT,
+      timestamp_local TEXT NOT NULL,
+      sync_attempts INTEGER NOT NULL DEFAULT 0,
+      last_error TEXT
+    )
+    ''');
+  }
+
   @override
   Future<void> saveActividad(ActividadLocal actividad) async {
     final db = await database;
-    
-    // SQLite no guarda listas directamente, convertimos a String (ej. CSV o JSON)
-    final detonantes = actividad.detonantesPresentados.join(',');
-    
-    await db.insert('actividades_pendientes', {
-      'id': actividad.id ?? _uuid.v4(),
-      'patient_id': actividad.patientId,
-      'actividad_id': actividad.actividadId,
-      'plan_id': actividad.planId,
-      'tiempo_empleado_segundos': actividad.tiempoEmpleadoSegundos,
-      'nivel_apoyo_requerido': actividad.nivelApoyoRequerido,
-      'observaciones': actividad.observaciones,
-      'detonantes_presentados': detonantes,
-      'completada': actividad.completada ? 1 : 0,
-      'timestamp_local': actividad.timestampLocal.toIso8601String(),
-    });
+
+    await db.insert(
+      'sesiones_pendientes_sync',
+      actividad.toJson(),
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
   }
 
   @override
   Future<List<ActividadLocal>> getActividadesPendientes() async {
     final db = await database;
-    final maps = await db.query('actividades_pendientes', orderBy: 'timestamp_local ASC'); // FIFO
+    final maps = await db.query(
+      'sesiones_pendientes_sync',
+      orderBy: 'timestamp_local ASC',
+    );
 
-    if (maps.isNotEmpty) {
-      return maps.map((map) {
-        return ActividadLocal(
-          id: map['id'] as String,
-          patientId: map['patient_id'] as int,
-          actividadId: map['actividad_id'] as String,
-          planId: map['plan_id'] as int,
-          tiempoEmpleadoSegundos: map['tiempo_empleado_segundos'] as int,
-          nivelApoyoRequerido: map['nivel_apoyo_requerido'] as int,
-          observaciones: map['observaciones'] as String,
-          detonantesPresentados: (map['detonantes_presentados'] as String).isEmpty 
-            ? [] 
-            : (map['detonantes_presentados'] as String).split(','),
-          completada: (map['completada'] as int) == 1,
-          timestampLocal: DateTime.parse(map['timestamp_local'] as String),
-        );
-      }).toList();
-    } else {
-      return [];
-    }
+    return maps.map(ActividadLocal.fromJson).toList();
   }
 
   @override
   Future<void> deleteActividades(List<String> ids) async {
+    if (ids.isEmpty) return;
     final db = await database;
-    for (String id in ids) {
-      await db.delete(
-        'actividades_pendientes',
-        where: 'id = ?',
-        whereArgs: [id],
-      );
-    }
+    await db.transaction((txn) async {
+      for (final id in ids) {
+        await txn.delete(
+          'sesiones_pendientes_sync',
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+      }
+    });
   }
 }

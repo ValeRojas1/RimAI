@@ -22,13 +22,14 @@ Rutas adicionales sin prefijo /dashboard:
 
 import json
 import os
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
+from uuid import UUID
 
 import psycopg2
 from psycopg2.extras import Json, RealDictCursor
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
 from app.adapters.inbound.api.dependencies import get_current_user
@@ -62,6 +63,122 @@ def _crear_notificacion_tutor(cur, nino_id, titulo, mensaje):
 
 # ── Pydantic models ────────────────────────────────────────────────────────────
 
+def _config_notificaciones_usuario(cur, usuario_id) -> Dict[str, Any]:
+    cur.execute(
+        """
+        SELECT
+            canal_preferido, alertas_clinicas, recordatorios_familia,
+            COALESCE(umbral_inactividad_dias, 7) AS umbral_inactividad_dias
+        FROM configuracion_notificaciones
+        WHERE usuario_id = %s
+        """,
+        (usuario_id,),
+    )
+    row = cur.fetchone()
+    if not row:
+        return {
+            "canal_preferido": "in_app",
+            "alertas_clinicas": True,
+            "recordatorios_familia": True,
+            "umbral_inactividad_dias": 7,
+        }
+    return {
+        "canal_preferido": row["canal_preferido"] or "in_app",
+        "alertas_clinicas": row["alertas_clinicas"] is not False,
+        "recordatorios_familia": row["recordatorios_familia"] is not False,
+        "umbral_inactividad_dias": int(row["umbral_inactividad_dias"] or 7),
+    }
+
+
+def _crear_notificacion_usuario(
+    cur,
+    usuario_id,
+    titulo: str,
+    mensaje: str,
+    *,
+    tipo: str = "general",
+    canal: str = "in_app",
+    entidad_tipo: Optional[str] = None,
+    entidad_id: Optional[str] = None,
+    payload: Optional[Dict[str, Any]] = None,
+):
+    cur.execute(
+        """
+        INSERT INTO notificaciones (
+            usuario_id, titulo, mensaje, tipo, canal, estado_envio,
+            entidad_tipo, entidad_id, payload, delivered_at
+        )
+        VALUES (%s, %s, %s, %s, %s, 'enviada', %s, %s, %s::jsonb, NOW())
+        RETURNING id
+        """,
+        (
+            usuario_id,
+            titulo,
+            mensaje,
+            tipo,
+            canal,
+            entidad_tipo,
+            entidad_id,
+            Json(payload or {}),
+        ),
+    )
+    row = cur.fetchone()
+    return row["id"] if row else None
+
+
+def _json_auditoria(payload: Optional[Dict[str, Any]]) -> Json:
+    return Json(payload or {}, dumps=lambda value: json.dumps(value, ensure_ascii=False, default=str))
+
+
+def _registrar_auditoria(
+    cur,
+    *,
+    usuario_id,
+    rol_usuario: str,
+    accion: str,
+    entidad_afectada: str,
+    entidad_id,
+    nino_id=None,
+    payload_anterior: Optional[Dict[str, Any]] = None,
+    payload_nuevo: Optional[Dict[str, Any]] = None,
+):
+    cur.execute(
+        """
+        INSERT INTO logs_auditoria (
+            usuario_id, rol_usuario, accion, entidad_afectada, entidad_id,
+            nino_id, payload_anterior, payload_nuevo, fecha_evento
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, NOW())
+        RETURNING id
+        """,
+        (
+            usuario_id,
+            rol_usuario,
+            accion,
+            entidad_afectada,
+            str(entidad_id),
+            str(nino_id) if nino_id else None,
+            _json_auditoria(payload_anterior),
+            _json_auditoria(payload_nuevo),
+        ),
+    )
+    row = cur.fetchone()
+    return row["id"] if row else None
+
+
+def _registrar_log_alerta(cur, usuario_id, accion: str, alerta_id, payload: Dict[str, Any]):
+    return _registrar_auditoria(
+        cur,
+        usuario_id=usuario_id,
+        rol_usuario="sistema",
+        accion=accion,
+        entidad_afectada="alertas_clinicas",
+        entidad_id=alerta_id,
+        nino_id=payload.get("nino_id"),
+        payload_nuevo=payload,
+    )
+
+
 @router.get("/api/files/evaluations/{filename}")
 def descargar_documento_clinico(
     filename: str,
@@ -93,6 +210,9 @@ class RegistrarNinoRequest(BaseModel):
     rutinas_regulacion: Optional[List[str]] = []
     documentos_clinicos: Optional[Dict[str, Any]] = {}
     medicacion_actual: Optional[str] = None
+    consentimiento_datos_sensibles: Optional[bool] = False
+    consentimiento_informado_version: Optional[str] = "LPDP-29733-v1"
+    acepta_uso_no_diagnostico: Optional[bool] = False
 
 
 class ActividadRequest(BaseModel):
@@ -119,6 +239,7 @@ class CrearSesionRequest(BaseModel):
     nino_id: str
     plan_id: str
     resultados: List[ResultadoActividadRequest]
+    client_event_id: Optional[UUID] = None
 
 
 class SolicitarAjusteDificultadRequest(BaseModel):
@@ -146,6 +267,13 @@ class ActualizarDificultadActividadRequest(BaseModel):
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
+
+class ActualizarConfigNotificacionesRequest(BaseModel):
+    canal_preferido: Optional[str] = "in_app"
+    alertas_clinicas: Optional[bool] = True
+    recordatorios_familia: Optional[bool] = True
+    umbral_inactividad_dias: Optional[int] = 7
+
 
 class ValidarNivelTeaRequest(BaseModel):
     nivel_tea: int
@@ -179,6 +307,113 @@ def _has_clinical_evidence(req: RegistrarNinoRequest) -> bool:
     documentos = req.documentos_clinicos or {}
     has_docs = any(bool(v) for v in documentos.values())
     return bool((req.diagnostico or "").strip() or (req.medicacion_actual or "").strip() or has_docs)
+
+
+def _contiene_datos_sensibles(req: RegistrarNinoRequest) -> bool:
+    return bool(
+        (req.diagnostico or "").strip()
+        or (req.medicacion_actual or "").strip()
+        or any(bool(v) for v in (req.documentos_clinicos or {}).values())
+        or any(bool(v) for v in (req.hitos or {}).values())
+        or any(bool(v) for v in (req.sensorial or {}).values())
+        or bool(req.rutinas_regulacion)
+        or bool(req.estimulos_aversivos)
+    )
+
+
+def _validar_consentimiento_sensible(req: RegistrarNinoRequest):
+    if _contiene_datos_sensibles(req) and not req.consentimiento_datos_sensibles:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "codigo": "consentimiento_datos_sensibles_requerido",
+                "mensaje": (
+                    "Debes confirmar el consentimiento informado para tratar datos "
+                    "sensibles del niño antes de registrar o actualizar el perfil."
+                ),
+            },
+        )
+    if not req.acepta_uso_no_diagnostico:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "codigo": "aviso_no_diagnostico_requerido",
+                "mensaje": (
+                    "Debes confirmar que RimAI opera como herramienta de apoyo "
+                    "clinico y no como diagnostico clinico."
+                ),
+            },
+        )
+
+
+def _registrar_consentimiento(
+    cur,
+    *,
+    nino_id,
+    tutor_id,
+    usuario_id,
+    version: Optional[str],
+    finalidad: str,
+    payload: Optional[Dict[str, Any]] = None,
+):
+    cur.execute(
+        """
+        INSERT INTO consentimientos_informados (
+            nino_id, tutor_id, usuario_id, version, finalidad,
+            datos_sensibles, aceptado, payload
+        )
+        VALUES (%s, %s, %s, %s, %s, TRUE, TRUE, %s::jsonb)
+        RETURNING id, accepted_at
+        """,
+        (
+            nino_id,
+            tutor_id,
+            usuario_id,
+            version or "LPDP-29733-v1",
+            finalidad,
+            _json_auditoria(payload),
+        ),
+    )
+    return cur.fetchone()
+
+
+def _tiene_consentimiento_activo(cur, nino_id) -> bool:
+    cur.execute(
+        """
+        SELECT 1
+        FROM consentimientos_informados
+        WHERE nino_id = %s
+          AND aceptado = TRUE
+          AND revoked_at IS NULL
+        LIMIT 1
+        """,
+        (nino_id,),
+    )
+    return cur.fetchone() is not None
+
+
+def _autorizar_acceso_nino(nino_id: str, current_user: Dict[str, Any]):
+    with _conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                "SELECT terapeuta_id, tutor_id FROM ninos WHERE id = %s AND activo = TRUE",
+                (nino_id,),
+            )
+            acceso = cur.fetchone()
+            if not acceso:
+                raise HTTPException(status_code=404, detail="Niño no encontrado")
+            if current_user["role"] == "terapeuta":
+                cur.execute("SELECT id FROM terapeutas WHERE usuario_id = %s", (current_user["id"],))
+                ter = cur.fetchone()
+                if not ter or acceso["terapeuta_id"] != ter["id"]:
+                    raise HTTPException(status_code=403, detail="Acceso denegado al nino")
+            elif current_user["role"] in ("padre_tutor", "tutor", "padre"):
+                cur.execute("SELECT id FROM padres_tutores WHERE usuario_id = %s", (current_user["id"],))
+                tutor = cur.fetchone()
+                if not tutor or acceso["tutor_id"] != tutor["id"]:
+                    raise HTTPException(status_code=403, detail="Acceso denegado al nino")
+            elif current_user["role"] != "admin":
+                raise HTTPException(status_code=403, detail="Acceso denegado")
 
 
 def _perfil_tiene_evidencia_clinica(
@@ -334,6 +569,680 @@ def _modo_ejecucion_por_tea(nivel_tea: Optional[int]) -> Dict[str, Any]:
         "modo_ejecucion": "acompanada" if requiere else "autonoma",
         "requiere_acompanamiento": requiere,
     }
+
+
+def _list_from_profile(value: Any) -> List[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, tuple):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, dict):
+        items = []
+        for key, item in value.items():
+            if isinstance(item, list):
+                items.extend(str(v).strip() for v in item if str(v).strip())
+            elif item:
+                items.append(str(key).strip())
+        return [item for item in items if item]
+    text = str(value).strip()
+    return [text] if text else []
+
+
+def _json_dict(value: Any) -> Dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+def _build_recomendaciones_actividad(nino: Dict[str, Any], actividad: Dict[str, Any]) -> List[str]:
+    perfil = _json_dict(nino.get("perfil_sensorial"))
+    recursos = _json_dict(actividad.get("recursos_multimedia"))
+    recomendaciones = _list_from_profile(recursos.get("recomendaciones"))
+
+    if actividad.get("requiere_acompanamiento"):
+        recomendaciones.append("Acompana al nino durante toda la actividad y modela la primera respuesta.")
+    else:
+        recomendaciones.append("Permite que el nino intente la actividad con supervision cercana.")
+
+    nivel = int(nino.get("nivel_tea_validado") or 0)
+    if nivel >= 2:
+        recomendaciones.append("Usa consignas breves, pausas predecibles y ayuda gradual si aparece frustracion.")
+
+    nivel_cognitivo = str(nino.get("nivel_cognitivo") or "").lower()
+    if "bajo" in nivel_cognitivo:
+        recomendaciones.append("Divide la consigna en pasos pequenos y confirma comprension antes de avanzar.")
+    elif "alto" in nivel_cognitivo:
+        recomendaciones.append("Ofrece una meta clara y deja espacio para resolver con mayor autonomia.")
+
+    intereses = _list_from_profile(perfil.get("intereses"))
+    if intereses:
+        recomendaciones.append(f"Conecta la consigna con intereses del nino: {', '.join(intereses[:3])}.")
+
+    aversivos = _list_from_profile(
+        perfil.get("estimulosAversivos") or perfil.get("estimulos_aversivos")
+    )
+    if aversivos:
+        recomendaciones.append(f"Reduce o anticipa estimulos aversivos registrados: {', '.join(aversivos[:3])}.")
+
+    rutinas = _list_from_profile(perfil.get("rutinas_regulacion"))
+    if rutinas:
+        recomendaciones.append(f"Inicia o cierra con una rutina de regulacion conocida: {rutinas[0]}.")
+
+    duracion = actividad.get("duracion_estimada")
+    if duracion:
+        minutos = max(1, int(duracion) // 60)
+        recomendaciones.append(f"Manten la actividad dentro de {minutos} min y registra si requiere mas tiempo.")
+
+    seen = set()
+    unicas = []
+    for item in recomendaciones:
+        clean = str(item).strip()
+        key = clean.lower()
+        if clean and key not in seen:
+            seen.add(key)
+            unicas.append(clean)
+    return unicas[:6]
+
+
+def _safe_float(value: Any) -> float:
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _pct(value: float) -> str:
+    return f"{value * 100:.1f}%"
+
+
+def _build_tendencia(sesiones: List[Dict[str, Any]]) -> Dict[str, Any]:
+    tasas = [s["tasa_aciertos"] for s in sesiones if s["total_intentos"] > 0]
+    if len(tasas) < 2:
+        return {
+            "direccion": "sin_datos_suficientes",
+            "variacion_tasa_aciertos": 0.0,
+            "primer_valor": tasas[0] if tasas else 0.0,
+            "ultimo_valor": tasas[-1] if tasas else 0.0,
+        }
+    variacion = round(tasas[-1] - tasas[0], 4)
+    if variacion > 0.05:
+        direccion = "mejora"
+    elif variacion < -0.05:
+        direccion = "descenso"
+    else:
+        direccion = "estable"
+    return {
+        "direccion": direccion,
+        "variacion_tasa_aciertos": variacion,
+        "primer_valor": tasas[0],
+        "ultimo_valor": tasas[-1],
+    }
+
+
+def _pdf_escape(text: Any) -> str:
+    clean = str(text).replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+    return clean.encode("latin-1", "replace").decode("latin-1")
+
+
+def _build_simple_pdf(lines: List[str]) -> bytes:
+    page_chunks = [lines[i:i + 42] for i in range(0, max(len(lines), 1), 42)]
+    objects = [
+        "<< /Type /Catalog /Pages 2 0 R >>",
+        "",  # pages placeholder
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    page_ids = []
+    for chunk in page_chunks:
+        content_lines = ["BT", "/F1 10 Tf", "50 790 Td", "14 TL"]
+        for line in chunk:
+            content_lines.append(f"({_pdf_escape(line)}) Tj")
+            content_lines.append("T*")
+        content_lines.append("ET")
+        stream = "\n".join(content_lines)
+        content_obj_id = len(objects) + 2
+        page_obj = (
+            f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] "
+            f"/Resources << /Font << /F1 3 0 R >> >> /Contents {content_obj_id} 0 R >>"
+        )
+        page_ids.append(len(objects) + 1)
+        objects.append(page_obj)
+        objects.append(f"<< /Length {len(stream.encode('latin-1', 'replace'))} >>\nstream\n{stream}\nendstream")
+
+    kids = " ".join(f"{page_id} 0 R" for page_id in page_ids)
+    objects[1] = f"<< /Type /Pages /Kids [{kids}] /Count {len(page_ids)} >>"
+
+    output = bytearray(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")
+    offsets = [0]
+    for index, obj in enumerate(objects, start=1):
+        offsets.append(len(output))
+        output.extend(f"{index} 0 obj\n".encode("ascii"))
+        output.extend(obj.encode("latin-1", "replace"))
+        output.extend(b"\nendobj\n")
+
+    xref_pos = len(output)
+    output.extend(f"xref\n0 {len(objects) + 1}\n".encode("ascii"))
+    output.extend(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        output.extend(f"{offset:010d} 00000 n \n".encode("ascii"))
+    output.extend(
+        f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref_pos}\n%%EOF\n".encode("ascii")
+    )
+    return bytes(output)
+
+
+def _build_reporte_pdf(reporte: Dict[str, Any]) -> bytes:
+    nino = reporte["nino"]
+    resumen = reporte["resumen"]
+    tendencia = reporte["tendencias"]
+    periodo = reporte["periodo"]
+    lines = [
+        "RimAI - Reporte terapeutico",
+        f"Paciente: {nino['nombre']} | Edad: {nino['edad']} | Nivel TEA: {nino.get('nivel_tea_validado') or 'pendiente'}",
+        f"Periodo: {periodo['inicio']} a {periodo['fin']}",
+        f"Generado: {reporte['generado_at']}",
+        "",
+        "Resumen",
+        f"Sesiones completadas: {resumen['sesiones_completadas']}",
+        f"Actividades registradas: {resumen['actividades_registradas']}",
+        f"Tasa global de aciertos: {_pct(resumen['tasa_aciertos_global'])}",
+        f"Cumplimiento: {_pct(resumen['cumplimiento_global'])}",
+        f"Tiempo promedio: {resumen['promedio_tiempo_segundos']:.1f} segundos",
+        f"Nivel de ayuda promedio: {resumen['promedio_ayuda']:.1f}",
+        "",
+        "Tendencias",
+        f"Direccion: {tendencia['direccion']}",
+        f"Variacion tasa aciertos: {_pct(tendencia['variacion_tasa_aciertos'])}",
+        "",
+        "Progreso por habilidad",
+    ]
+    for item in reporte["progreso_por_habilidad"]:
+        lines.append(
+            f"- {item['habilidad']}: {_pct(item['tasa_aciertos'])}, "
+            f"{item['actividades']} actividades, ayuda {item['promedio_ayuda']:.1f}"
+        )
+    lines.extend(["", "Sesiones"])
+    for sesion in reporte["sesiones"]:
+        lines.append(
+            f"- {sesion['fecha']}: {_pct(sesion['tasa_aciertos'])}, "
+            f"{sesion['total_aciertos']}/{sesion['total_intentos']} aciertos, "
+            f"ayuda {sesion['promedio_ayuda']:.1f}"
+        )
+    lines.extend(["", "Observaciones"])
+    if reporte["observaciones"]:
+        for obs in reporte["observaciones"]:
+            lines.append(f"- {obs['fecha']} | {obs['actividad']}: {obs['observacion']}")
+    else:
+        lines.append("Sin observaciones registradas en el periodo.")
+    return _build_simple_pdf(lines)
+
+
+def _emitir_alerta_clinica(
+    cur,
+    nino: Dict[str, Any],
+    *,
+    tipo: str,
+    severidad: str,
+    titulo: str,
+    mensaje: str,
+    metricas: Dict[str, Any],
+    recordatorio_familia: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    dedupe_key = f"{tipo}:{nino['id']}:{datetime.utcnow().date().isoformat()}"
+    ter_config = _config_notificaciones_usuario(cur, nino["terapeuta_usuario_id"])
+    tutor_config = _config_notificaciones_usuario(cur, nino["tutor_usuario_id"]) if nino.get("tutor_usuario_id") else {
+        "canal_preferido": "in_app",
+        "recordatorios_familia": False,
+    }
+    canal = ter_config["canal_preferido"]
+
+    cur.execute(
+        """
+        INSERT INTO alertas_clinicas (
+            nino_id, terapeuta_id, tutor_id, tipo, severidad, titulo,
+            mensaje, canal, estado_envio, metricas, dedupe_key
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'registrada', %s::jsonb, %s)
+        ON CONFLICT (dedupe_key) DO NOTHING
+        RETURNING id, created_at
+        """,
+        (
+            nino["id"],
+            nino["terapeuta_id"],
+            nino.get("tutor_id"),
+            tipo,
+            severidad,
+            titulo,
+            mensaje,
+            canal,
+            Json(metricas),
+            dedupe_key,
+        ),
+    )
+    alerta = cur.fetchone()
+    if not alerta:
+        return None
+
+    payload = {
+        "alerta_id": str(alerta["id"]),
+        "nino_id": str(nino["id"]),
+        "nino_nombre": nino["nombre"],
+        "tipo": tipo,
+        "severidad": severidad,
+        "metricas": metricas,
+    }
+
+    notificacion_terapeuta_id = None
+    if ter_config["alertas_clinicas"]:
+        notificacion_terapeuta_id = _crear_notificacion_usuario(
+            cur,
+            nino["terapeuta_usuario_id"],
+            titulo,
+            mensaje,
+            tipo="alerta_clinica",
+            canal=canal,
+            entidad_tipo="alertas_clinicas",
+            entidad_id=str(alerta["id"]),
+            payload=payload,
+        )
+
+    notificacion_familia_id = None
+    if recordatorio_familia and nino.get("tutor_usuario_id") and tutor_config["recordatorios_familia"]:
+        notificacion_familia_id = _crear_notificacion_usuario(
+            cur,
+            nino["tutor_usuario_id"],
+            "Recordatorio de actividad terapeutica",
+            recordatorio_familia,
+            tipo="recordatorio_familia",
+            canal=tutor_config["canal_preferido"],
+            entidad_tipo="alertas_clinicas",
+            entidad_id=str(alerta["id"]),
+            payload=payload,
+        )
+
+    cur.execute(
+        """
+        UPDATE alertas_clinicas
+        SET estado_envio = 'enviada',
+            notificacion_terapeuta_id = %s,
+            notificacion_familia_id = %s,
+            updated_at = NOW()
+        WHERE id = %s
+        """,
+        (notificacion_terapeuta_id, notificacion_familia_id, alerta["id"]),
+    )
+    _registrar_log_alerta(cur, nino["terapeuta_usuario_id"], "ALERTA_CLINICA_GENERADA", alerta["id"], payload)
+    return {
+        "id": str(alerta["id"]),
+        "tipo": tipo,
+        "severidad": severidad,
+        "titulo": titulo,
+        "mensaje": mensaje,
+        "created_at": alerta["created_at"].isoformat() if alerta["created_at"] else None,
+    }
+
+
+def _predecir_riesgo_abandono(
+    cur,
+    nino: Dict[str, Any],
+    *,
+    umbral_inactividad_dias: int = 7,
+) -> Dict[str, Any]:
+    cur.execute(
+        """
+        SELECT
+            MAX(fecha_inicio) AS ultima_sesion,
+            COUNT(*) FILTER (WHERE fecha_inicio >= NOW() - INTERVAL '14 days') AS sesiones_14,
+            COUNT(*) FILTER (WHERE fecha_inicio >= NOW() - INTERVAL '30 days') AS sesiones_30,
+            COUNT(*) FILTER (
+                WHERE fecha_inicio >= NOW() - INTERVAL '30 days'
+                  AND estado = 'completada'
+            ) AS completadas_30,
+            COUNT(*) FILTER (
+                WHERE fecha_inicio >= NOW() - INTERVAL '30 days'
+                  AND estado = 'interrumpida'
+            ) AS interrumpidas_30
+        FROM sesiones
+        WHERE nino_id = %s
+        """,
+        (nino["id"],),
+    )
+    sesiones = cur.fetchone() or {}
+    ultima = sesiones.get("ultima_sesion")
+    publicado_at = nino.get("plan_publicado_at") or datetime.utcnow()
+    dias_sin_actividad = (
+        int((datetime.utcnow() - ultima.replace(tzinfo=None)).days)
+        if ultima else
+        int((datetime.utcnow() - publicado_at.replace(tzinfo=None)).days)
+    )
+
+    cur.execute(
+        """
+        SELECT
+            COUNT(pa.actividad_id) AS total_plan,
+            COUNT(pa.actividad_id) FILTER (
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM sesiones s
+                    JOIN resultados_actividad ra ON ra.sesion_id = s.id
+                    WHERE s.plan_id = pa.plan_id
+                      AND s.nino_id = %s
+                      AND s.estado = 'completada'
+                      AND ra.actividad_id = pa.actividad_id
+                )
+            ) AS pendientes
+        FROM plan_actividades pa
+        WHERE pa.plan_id = %s
+        """,
+        (nino["id"], nino["plan_id"]),
+    )
+    pendientes_row = cur.fetchone() or {}
+    total_plan = int(pendientes_row.get("total_plan") or 0)
+    pendientes = int(pendientes_row.get("pendientes") or 0)
+    proporcion_pendiente = round(pendientes / total_plan, 4) if total_plan else 0.0
+
+    sesiones_30 = int(sesiones.get("sesiones_30") or 0)
+    sesiones_14 = int(sesiones.get("sesiones_14") or 0)
+    interrumpidas_30 = int(sesiones.get("interrumpidas_30") or 0)
+    completadas_30 = int(sesiones.get("completadas_30") or 0)
+    tasa_interrupcion = round(interrumpidas_30 / sesiones_30, 4) if sesiones_30 else 0.0
+
+    score = 0
+    factores = []
+    if dias_sin_actividad > umbral_inactividad_dias * 2:
+        score += 3
+        factores.append("inactividad_prolongada")
+    elif dias_sin_actividad > umbral_inactividad_dias:
+        score += 2
+        factores.append("inactividad_mayor_umbral")
+
+    if sesiones_14 == 0:
+        score += 2
+        factores.append("sin_sesiones_ultimos_14_dias")
+    elif sesiones_14 < 2:
+        score += 1
+        factores.append("baja_frecuencia_reciente")
+
+    if sesiones_30 >= 2 and tasa_interrupcion >= 0.4:
+        score += 2
+        factores.append("interrupciones_frecuentes")
+    elif sesiones_30 >= 2 and tasa_interrupcion >= 0.2:
+        score += 1
+        factores.append("interrupciones_observadas")
+
+    if total_plan > 0 and proporcion_pendiente >= 0.75 and dias_sin_actividad > umbral_inactividad_dias:
+        score += 2
+        factores.append("actividades_pendientes_altas")
+    elif total_plan > 0 and proporcion_pendiente >= 0.5:
+        score += 1
+        factores.append("actividades_pendientes_moderadas")
+
+    if sesiones_30 < 2 and dias_sin_actividad > umbral_inactividad_dias:
+        score += 1
+        factores.append("baja_continuidad_30_dias")
+
+    if score >= 5:
+        nivel = "alto"
+    elif score >= 3:
+        nivel = "moderado"
+    else:
+        nivel = "bajo"
+
+    return {
+        "nivel": nivel,
+        "score": score,
+        "umbral_inactividad_dias": umbral_inactividad_dias,
+        "dias_sin_actividad": dias_sin_actividad,
+        "sesiones_14_dias": sesiones_14,
+        "sesiones_30_dias": sesiones_30,
+        "sesiones_completadas_30_dias": completadas_30,
+        "sesiones_interrumpidas_30_dias": interrumpidas_30,
+        "tasa_interrupcion_30_dias": tasa_interrupcion,
+        "actividades_plan": total_plan,
+        "actividades_pendientes": pendientes,
+        "proporcion_actividades_pendientes": proporcion_pendiente,
+        "factores": factores,
+        "nota_clinica": "Herramienta de apoyo clinico; no constituye diagnostico.",
+    }
+
+
+def _evaluar_alertas_clinicas(
+    cur,
+    terapeuta_id,
+    *,
+    nino_id: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    filtro_nino = "AND n.id = %s" if nino_id else ""
+    params = [terapeuta_id]
+    if nino_id:
+        params.append(nino_id)
+
+    cur.execute(
+        f"""
+        SELECT
+            n.id,
+            n.nombre,
+            n.tutor_id,
+            n.terapeuta_id,
+            pt.id AS plan_id,
+            COALESCE(pt.publicado_at, pt.created_at) AS plan_publicado_at,
+            ter.usuario_id AS terapeuta_usuario_id,
+            tutor.usuario_id AS tutor_usuario_id
+        FROM ninos n
+        JOIN terapeutas ter ON ter.id = n.terapeuta_id
+        LEFT JOIN padres_tutores tutor ON tutor.id = n.tutor_id
+        JOIN planes_terapeuticos pt
+          ON pt.nino_id = n.id
+         AND pt.activo = TRUE
+         AND pt.estado_plan = 'publicado'
+         AND pt.publicado_para_tutor = TRUE
+        WHERE n.terapeuta_id = %s
+          AND n.activo = TRUE
+          {filtro_nino}
+        """,
+        tuple(params),
+    )
+    ninos = cur.fetchall()
+    nuevas_alertas: List[Dict[str, Any]] = []
+
+    for nino in ninos:
+        ter_config = _config_notificaciones_usuario(cur, nino["terapeuta_usuario_id"])
+        umbral_inactividad = int(ter_config.get("umbral_inactividad_dias") or 7)
+        riesgo_abandono = _predecir_riesgo_abandono(
+            cur,
+            nino,
+            umbral_inactividad_dias=umbral_inactividad,
+        )
+        cur.execute(
+            """
+            SELECT
+                MAX(fecha_inicio) AS ultima_sesion,
+                COUNT(*) FILTER (WHERE fecha_inicio >= NOW() - INTERVAL '7 days') AS sesiones_7,
+                COUNT(*) FILTER (WHERE fecha_inicio >= NOW() - INTERVAL '14 days') AS sesiones_14,
+                COUNT(*) FILTER (WHERE fecha_inicio >= NOW() - INTERVAL '30 days') AS sesiones_30
+            FROM sesiones
+            WHERE nino_id = %s AND estado = 'completada'
+            """,
+            (nino["id"],),
+        )
+        actividad = cur.fetchone() or {}
+        ultima = actividad.get("ultima_sesion")
+        dias_sin_actividad = (
+            int((datetime.utcnow() - ultima.replace(tzinfo=None)).days)
+            if ultima else
+            int((datetime.utcnow() - nino["plan_publicado_at"].replace(tzinfo=None)).days)
+        )
+        sesiones_14 = int(actividad.get("sesiones_14") or 0)
+        dias_sin_actividad = int(riesgo_abandono["dias_sin_actividad"])
+        sesiones_14 = int(riesgo_abandono["sesiones_14_dias"])
+
+        cur.execute(
+            """
+            SELECT
+                COUNT(ra.id) AS actividades,
+                ROUND(
+                    CAST(SUM(COALESCE(ra.aciertos, 0)) AS NUMERIC)
+                    / NULLIF(SUM(NULLIF(ra.repeticiones, 0)), 0),
+                    4
+                ) AS tasa_aciertos,
+                AVG(
+                    CASE
+                        WHEN COALESCE(ra.repeticiones, 0) > 0
+                        THEN COALESCE(ra.aciertos, 0)::float / ra.repeticiones
+                        ELSE NULL
+                    END
+                ) AS cumplimiento,
+                AVG(COALESCE(ra.nivel_ayuda_requerido, 0)) AS promedio_ayuda
+            FROM sesiones s
+            JOIN resultados_actividad ra ON ra.sesion_id = s.id
+            WHERE s.nino_id = %s
+              AND s.estado = 'completada'
+              AND s.fecha_inicio >= NOW() - INTERVAL '30 days'
+            """,
+            (nino["id"],),
+        )
+        progreso = cur.fetchone() or {}
+        cumplimiento = _safe_float(progreso.get("cumplimiento"))
+        tasa_aciertos = _safe_float(progreso.get("tasa_aciertos"))
+        actividades = int(progreso.get("actividades") or 0)
+
+        cur.execute(
+            """
+            SELECT
+                s.fecha_inicio,
+                ROUND(
+                    CAST(SUM(COALESCE(ra.aciertos, 0)) AS NUMERIC)
+                    / NULLIF(SUM(NULLIF(ra.repeticiones, 0)), 0),
+                    4
+                ) AS tasa_aciertos
+            FROM sesiones s
+            JOIN resultados_actividad ra ON ra.sesion_id = s.id
+            WHERE s.nino_id = %s
+              AND s.estado = 'completada'
+            GROUP BY s.id, s.fecha_inicio
+            ORDER BY s.fecha_inicio DESC
+            LIMIT 6
+            """,
+            (nino["id"],),
+        )
+        sesion_metricas = list(reversed(cur.fetchall()))
+        retroceso = 0.0
+        if len(sesion_metricas) >= 4:
+            mitad = len(sesion_metricas) // 2
+            previas = [_safe_float(row["tasa_aciertos"]) for row in sesion_metricas[:mitad]]
+            recientes = [_safe_float(row["tasa_aciertos"]) for row in sesion_metricas[mitad:]]
+            promedio_previo = sum(previas) / len(previas)
+            promedio_reciente = sum(recientes) / len(recientes)
+            retroceso = round(promedio_previo - promedio_reciente, 4)
+
+        base_metricas = {
+            "dias_sin_actividad": dias_sin_actividad,
+            "sesiones_14_dias": sesiones_14,
+            "sesiones_30_dias": int(actividad.get("sesiones_30") or 0),
+            "actividades_30_dias": actividades,
+            "cumplimiento_30_dias": cumplimiento,
+            "tasa_aciertos_30_dias": tasa_aciertos,
+            "retroceso_tasa_aciertos": retroceso,
+            "riesgo_abandono": riesgo_abandono,
+        }
+
+        if riesgo_abandono["nivel"] == "alto":
+            nuevas_alertas.append(
+                _emitir_alerta_clinica(
+                    cur,
+                    nino,
+                    tipo="riesgo_abandono_alto",
+                    severidad="CRITICA",
+                    titulo=f"Riesgo alto de abandono: {nino['nombre']}",
+                    mensaje=(
+                        f"{nino['nombre']} presenta riesgo alto de abandono terapeutico "
+                        f"(puntaje {riesgo_abandono['score']}). "
+                        "Usa esta señal como apoyo clinico, no como diagnostico."
+                    ),
+                    metricas=base_metricas,
+                )
+            )
+
+        if dias_sin_actividad > umbral_inactividad:
+            nuevas_alertas.append(
+                _emitir_alerta_clinica(
+                    cur,
+                    nino,
+                    tipo="sin_actividad_umbral",
+                    severidad="ADVERTENCIA" if dias_sin_actividad < umbral_inactividad * 2 else "CRITICA",
+                    titulo=f"Sin actividad registrada: {nino['nombre']}",
+                    mensaje=(
+                        f"{nino['nombre']} acumula {dias_sin_actividad} dias sin actividad registrada. "
+                        f"El umbral configurado es {umbral_inactividad} dias."
+                    ),
+                    metricas=base_metricas,
+                    recordatorio_familia=(
+                        f"No se registran actividades de {nino['nombre']} hace mas de {umbral_inactividad} dias. "
+                        "Retoma el plan publicado o coordina con el terapeuta si hubo dificultades."
+                    ),
+                )
+            )
+
+        if sesiones_14 < 2 and dias_sin_actividad <= umbral_inactividad:
+            nuevas_alertas.append(
+                _emitir_alerta_clinica(
+                    cur,
+                    nino,
+                    tipo="uso_irregular",
+                    severidad="ADVERTENCIA",
+                    titulo=f"Patron de uso irregular: {nino['nombre']}",
+                    mensaje=(
+                        f"{nino['nombre']} registra menos de 2 sesiones en los ultimos 14 dias. "
+                        "Sugiere revisar barreras de ejecucion con la familia."
+                    ),
+                    metricas=base_metricas,
+                    recordatorio_familia=(
+                        f"El plan de {nino['nombre']} se esta ejecutando con baja frecuencia. "
+                        "Intenta retomar una rutina semanal estable."
+                    ),
+                )
+            )
+
+        if actividades >= 2 and cumplimiento < 0.6:
+            nuevas_alertas.append(
+                _emitir_alerta_clinica(
+                    cur,
+                    nino,
+                    tipo="baja_adherencia",
+                    severidad="CRITICA" if cumplimiento < 0.45 else "ADVERTENCIA",
+                    titulo=f"Baja adherencia: {nino['nombre']}",
+                    mensaje=(
+                        f"Cumplimiento reciente de {nino['nombre']}: {cumplimiento * 100:.0f}%. "
+                        "Revisa dificultad, apoyos y continuidad del plan."
+                    ),
+                    metricas=base_metricas,
+                )
+            )
+
+        if retroceso >= 0.2:
+            nuevas_alertas.append(
+                _emitir_alerta_clinica(
+                    cur,
+                    nino,
+                    tipo="retroceso_significativo",
+                    severidad="CRITICA" if retroceso >= 0.35 else "ADVERTENCIA",
+                    titulo=f"Retroceso significativo: {nino['nombre']}",
+                    mensaje=(
+                        f"La tasa de aciertos de {nino['nombre']} descendio {retroceso * 100:.0f} puntos "
+                        "respecto a sesiones previas."
+                    ),
+                    metricas=base_metricas,
+                )
+            )
+
+    return [alerta for alerta in nuevas_alertas if alerta]
 
 
 def _validar_plan_publicable(cur, plan_id: str, terapeuta_id: str) -> Dict[str, Any]:
@@ -618,6 +1527,7 @@ def resumen_terapeuta(current_user: dict = Depends(get_current_user)):
                 raise HTTPException(status_code=404, detail="Terapeuta no encontrado")
 
             terapeuta_id = str(ter["terapeuta_id"])
+            _evaluar_alertas_clinicas(cur, ter["terapeuta_id"])
 
             # 2. Pacientes activos asignados
             cur.execute(
@@ -630,6 +1540,8 @@ def resumen_terapeuta(current_user: dict = Depends(get_current_user)):
                     n.estado_clinico,
                     pt.id   AS plan_activo_id,
                     pt.nombre AS plan_activo,
+                    pt.publicado_at AS plan_publicado_at,
+                    pt.created_at AS plan_created_at,
                     s.fecha_inicio AS ultima_sesion_fecha,
                     s.estado        AS ultima_sesion_estado,
                     (
@@ -670,28 +1582,55 @@ def resumen_terapeuta(current_user: dict = Depends(get_current_user)):
             )
             sesiones_semana = cur.fetchone()["cnt"] or 0
 
-            # 4. Alertas de baja adherencia (simplificado: sesiones con tasa < 0.7)
+            # 4. Alertas clinicas pendientes generadas por evaluacion automatica.
             cur.execute(
                 """
-                SELECT COUNT(DISTINCT n.id) AS cnt
-                FROM ninos n
-                JOIN sesiones s ON s.nino_id = n.id
-                JOIN resultados_actividad ra ON ra.sesion_id = s.id
-                WHERE n.terapeuta_id = %s
-                  AND n.activo = TRUE
-                GROUP BY n.id
-                HAVING ROUND(
-                    CAST(SUM(ra.aciertos) AS NUMERIC) /
-                    NULLIF(SUM(ra.repeticiones), 0), 2
-                ) < 0.7
+                SELECT COUNT(*) AS cnt
+                FROM alertas_clinicas
+                WHERE terapeuta_id = %s
+                  AND resuelta = FALSE
                 """,
                 (terapeuta_id,),
             )
-            alertas_rows = cur.fetchall()
-            alertas = len(alertas_rows)
+            alertas = int((cur.fetchone() or {}).get("cnt") or 0)
+            config_notificaciones = _config_notificaciones_usuario(cur, user_id)
+            riesgo_por_nino: Dict[str, Dict[str, Any]] = {}
+            for nino in ninos:
+                if nino["plan_activo_id"]:
+                    riesgo_por_nino[str(nino["id"])] = _predecir_riesgo_abandono(
+                        cur,
+                        {
+                            "id": nino["id"],
+                            "plan_id": nino["plan_activo_id"],
+                            "plan_publicado_at": (
+                                nino["plan_publicado_at"]
+                                or nino["plan_created_at"]
+                                or datetime.utcnow()
+                            ),
+                        },
+                        umbral_inactividad_dias=int(
+                            config_notificaciones.get("umbral_inactividad_dias") or 7
+                        ),
+                    )
 
     pacientes_list = []
     for n in ninos:
+        riesgo_abandono = riesgo_por_nino.get(str(n["id"]), {
+            "nivel": "bajo",
+            "score": 0,
+            "umbral_inactividad_dias": int(config_notificaciones.get("umbral_inactividad_dias") or 7),
+            "dias_sin_actividad": 0,
+            "sesiones_14_dias": 0,
+            "sesiones_30_dias": 0,
+            "sesiones_completadas_30_dias": 0,
+            "sesiones_interrumpidas_30_dias": 0,
+            "tasa_interrupcion_30_dias": 0,
+            "actividades_plan": 0,
+            "actividades_pendientes": 0,
+            "proporcion_actividades_pendientes": 0,
+            "factores": [],
+            "nota_clinica": "Herramienta de apoyo clinico; no constituye diagnostico.",
+        })
         pacientes_list.append(
             {
                 "id": str(n["id"]),
@@ -712,6 +1651,7 @@ def resumen_terapeuta(current_user: dict = Depends(get_current_user)):
                 }
                 if n["ultima_sesion_fecha"]
                 else None,
+                "riesgo_abandono": riesgo_abandono,
             }
         )
 
@@ -726,6 +1666,225 @@ def resumen_terapeuta(current_user: dict = Depends(get_current_user)):
 
 
 # ── GET /api/dashboard/terapeuta/pendientes ────────────────────────────────────
+
+@router.get("/api/dashboard/notificaciones/configuracion")
+def obtener_configuracion_notificaciones(current_user: dict = Depends(get_current_user)):
+    with _conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            config = _config_notificaciones_usuario(cur, current_user["id"])
+    return config
+
+
+@router.patch("/api/dashboard/notificaciones/configuracion")
+def actualizar_configuracion_notificaciones(
+    req: ActualizarConfigNotificacionesRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    canal = (req.canal_preferido or "in_app").strip()
+    if canal not in ("in_app", "email", "sms"):
+        raise HTTPException(status_code=400, detail="Canal de notificacion no soportado")
+    umbral = int(req.umbral_inactividad_dias or 7)
+    if umbral < 1 or umbral > 60:
+        raise HTTPException(status_code=400, detail="El umbral de inactividad debe estar entre 1 y 60 dias")
+
+    with _conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                INSERT INTO configuracion_notificaciones (
+                    usuario_id, canal_preferido, alertas_clinicas,
+                    recordatorios_familia, umbral_inactividad_dias, updated_at
+                )
+                VALUES (%s, %s, %s, %s, %s, NOW())
+                ON CONFLICT (usuario_id) DO UPDATE
+                SET canal_preferido = EXCLUDED.canal_preferido,
+                    alertas_clinicas = EXCLUDED.alertas_clinicas,
+                    recordatorios_familia = EXCLUDED.recordatorios_familia,
+                    umbral_inactividad_dias = EXCLUDED.umbral_inactividad_dias,
+                    updated_at = NOW()
+                RETURNING canal_preferido, alertas_clinicas, recordatorios_familia, umbral_inactividad_dias
+                """,
+                (
+                    current_user["id"],
+                    canal,
+                    req.alertas_clinicas is not False,
+                    req.recordatorios_familia is not False,
+                    umbral,
+                ),
+            )
+            config = cur.fetchone()
+            _registrar_auditoria(
+                cur,
+                usuario_id=current_user["id"],
+                rol_usuario=current_user["role"],
+                accion="CONFIG_NOTIFICACIONES_ACTUALIZADA",
+                entidad_afectada="configuracion_notificaciones",
+                entidad_id=current_user["id"],
+                payload_nuevo=dict(config),
+            )
+    return dict(config)
+
+
+@router.post("/api/dashboard/terapeuta/alertas/evaluar")
+def evaluar_alertas_terapeuta(current_user: dict = Depends(get_current_user)):
+    if current_user["role"] != "terapeuta":
+        raise HTTPException(status_code=403, detail="Solo terapeutas pueden evaluar alertas clinicas")
+
+    with _conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT id FROM terapeutas WHERE usuario_id = %s", (current_user["id"],))
+            ter = cur.fetchone()
+            if not ter:
+                raise HTTPException(status_code=404, detail="Perfil de terapeuta no encontrado")
+            nuevas = _evaluar_alertas_clinicas(cur, ter["id"])
+    return {"generadas": len(nuevas), "alertas": nuevas}
+
+
+@router.get("/api/dashboard/terapeuta/alertas")
+def listar_alertas_terapeuta(current_user: dict = Depends(get_current_user)):
+    if current_user["role"] != "terapeuta":
+        raise HTTPException(status_code=403, detail="Solo terapeutas pueden ver alertas clinicas")
+
+    with _conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT id FROM terapeutas WHERE usuario_id = %s", (current_user["id"],))
+            ter = cur.fetchone()
+            if not ter:
+                raise HTTPException(status_code=404, detail="Perfil de terapeuta no encontrado")
+            _evaluar_alertas_clinicas(cur, ter["id"])
+            cur.execute(
+                """
+                SELECT
+                    ac.id, ac.nino_id, n.nombre AS nino_nombre, ac.tipo,
+                    ac.severidad, ac.titulo, ac.mensaje, ac.canal,
+                    ac.estado_envio, ac.metricas, ac.resuelta, ac.created_at
+                FROM alertas_clinicas ac
+                JOIN ninos n ON n.id = ac.nino_id
+                WHERE ac.terapeuta_id = %s
+                ORDER BY ac.resuelta ASC, ac.created_at DESC
+                LIMIT 100
+                """,
+                (ter["id"],),
+            )
+            rows = cur.fetchall()
+    return [
+        {
+            "id": str(row["id"]),
+            "nino_id": str(row["nino_id"]),
+            "nino_nombre": row["nino_nombre"],
+            "tipo": row["tipo"],
+            "severidad": row["severidad"],
+            "titulo": row["titulo"],
+            "mensaje": row["mensaje"],
+            "canal": row["canal"],
+            "estado_envio": row["estado_envio"],
+            "metricas": row["metricas"] or {},
+            "resuelta": row["resuelta"],
+            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+        }
+        for row in rows
+    ]
+
+
+@router.patch("/api/dashboard/terapeuta/alertas/{alerta_id}/resolver")
+def resolver_alerta_terapeuta(
+    alerta_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    if current_user["role"] != "terapeuta":
+        raise HTTPException(status_code=403, detail="Solo terapeutas pueden resolver alertas clinicas")
+
+    with _conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT id FROM terapeutas WHERE usuario_id = %s", (current_user["id"],))
+            ter = cur.fetchone()
+            if not ter:
+                raise HTTPException(status_code=404, detail="Perfil de terapeuta no encontrado")
+            cur.execute(
+                """
+                UPDATE alertas_clinicas
+                SET resuelta = TRUE, resuelta_at = NOW(), updated_at = NOW()
+                WHERE id = %s AND terapeuta_id = %s
+                RETURNING id, nino_id, tipo
+                """,
+                (alerta_id, ter["id"]),
+            )
+            alerta = cur.fetchone()
+            if not alerta:
+                raise HTTPException(status_code=404, detail="Alerta no encontrada")
+            _registrar_log_alerta(
+                cur,
+                current_user["id"],
+                "ALERTA_CLINICA_RESUELTA",
+                alerta["id"],
+                {"alerta_id": str(alerta["id"]), "nino_id": str(alerta["nino_id"]), "tipo": alerta["tipo"]},
+            )
+    return {"ok": True, "alerta_id": alerta_id}
+
+
+@router.get("/api/dashboard/terapeuta/notificaciones")
+def obtener_notificaciones_terapeuta(current_user: dict = Depends(get_current_user)):
+    if current_user["role"] != "terapeuta":
+        raise HTTPException(status_code=403, detail="Solo terapeutas pueden acceder a estas notificaciones")
+
+    with _conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT
+                    id, titulo, mensaje, leido, created_at, tipo, canal,
+                    estado_envio, entidad_tipo, entidad_id, payload
+                FROM notificaciones
+                WHERE usuario_id = %s
+                ORDER BY created_at DESC
+                LIMIT 100
+                """,
+                (current_user["id"],),
+            )
+            rows = cur.fetchall()
+
+    return [
+        {
+            "id": str(r["id"]),
+            "titulo": r["titulo"],
+            "mensaje": r["mensaje"],
+            "leido": r["leido"],
+            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            "tipo": r["tipo"],
+            "canal": r["canal"],
+            "estado_envio": r["estado_envio"],
+            "entidad_tipo": r["entidad_tipo"],
+            "entidad_id": str(r["entidad_id"]) if r["entidad_id"] else None,
+            "payload": r["payload"] or {},
+        }
+        for r in rows
+    ]
+
+
+@router.patch("/api/dashboard/terapeuta/notificaciones/{notificacion_id}/leer")
+def marcar_notificacion_terapeuta_leida(
+    notificacion_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    if current_user["role"] != "terapeuta":
+        raise HTTPException(status_code=403, detail="Solo terapeutas pueden leer estas notificaciones")
+
+    with _conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                UPDATE notificaciones
+                SET leido = TRUE
+                WHERE id = %s AND usuario_id = %s
+                RETURNING id
+                """,
+                (notificacion_id, current_user["id"]),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Notificacion no encontrada")
+    return {"ok": True, "notificacion_id": notificacion_id}
+
 
 @router.get("/api/dashboard/terapeuta/pendientes")
 def pacientes_pendientes(current_user: dict = Depends(get_current_user)):
@@ -837,7 +1996,6 @@ def vincular_paciente_por_email(
             nino = cur.fetchone()
             if not nino:
                 raise HTTPException(status_code=404, detail="Niño no encontrado")
-
             perfil = nino.get("perfil_sensorial") or {}
             triaje = _triaje_from_perfil(perfil)
             requiere_scq = bool(triaje.get("requiere_scq", False))
@@ -874,6 +2032,24 @@ def vincular_paciente_por_email(
 
             mensaje = f"Tu hijo/a {nino_nombre} ha sido vinculado/a al terapeuta {terapeuta_nombre}."
             _crear_notificacion_tutor(cur, nino["id"], "Terapeuta Vinculado", mensaje)
+            _registrar_auditoria(
+                cur,
+                usuario_id=current_user["id"],
+                rol_usuario=current_user["role"],
+                accion="NINO_VINCULADO_TERAPEUTA",
+                entidad_afectada="ninos",
+                entidad_id=nino["id"],
+                nino_id=nino["id"],
+                payload_anterior={
+                    "terapeuta_id": None,
+                    "estado_clinico": nino.get("estado_clinico"),
+                },
+                payload_nuevo={
+                    "terapeuta_id": str(ter["id"]),
+                    "estado_clinico": nuevo_estado,
+                    "metodo": "email" if req.email else "nino_id",
+                },
+            )
 
     return {"ok": True, "nino_id": str(nino["id"])}
 
@@ -969,6 +2145,20 @@ def vincular_paciente_por_id(
 
             mensaje = f"Tu hijo/a {nino_nombre} ha sido vinculado/a al terapeuta {terapeuta_nombre}."
             _crear_notificacion_tutor(cur, nino_id, "Terapeuta Vinculado", mensaje)
+            _registrar_auditoria(
+                cur,
+                usuario_id=current_user["id"],
+                rol_usuario=current_user["role"],
+                accion="NINO_VINCULADO_TERAPEUTA",
+                entidad_afectada="ninos",
+                entidad_id=nino["id"],
+                nino_id=nino["id"],
+                payload_nuevo={
+                    "terapeuta_id": str(ter["id"]),
+                    "estado_clinico": "listo_para_plan" if omitir_perfil else nuevo_estado,
+                    "omitir_perfil": omitir_perfil,
+                },
+            )
 
     return {"ok": True, "nino_id": nino_id}
 
@@ -977,7 +2167,10 @@ def vincular_paciente_por_id(
 
 @router.get("/api/dashboard/familia/resumen")
 def resumen_familia(current_user: dict = Depends(get_current_user)):
-    """Resumen del panel familiar: lista de niños vinculados al tutor."""
+    """Resumen del panel familiar con avance solo de los ninos vinculados."""
+    if current_user["role"] not in ("padre_tutor", "tutor", "padre"):
+        raise HTTPException(status_code=403, detail="Solo los tutores pueden acceder al modulo familiar")
+
     user_id = current_user["id"]
 
     with _conn() as conn:
@@ -995,7 +2188,8 @@ def resumen_familia(current_user: dict = Depends(get_current_user)):
                 SELECT
                     n.id, n.nombre, n.fecha_nacimiento,
                     n.nivel_cognitivo, n.estado_clinico, n.diagnostico,
-                    n.perfil_sensorial,
+                    n.perfil_sensorial, n.objetivos_intervencion,
+                    n.nivel_tea_validado,
                     pt.id AS plan_activo_id,
                     pt.nombre AS plan_activo,
                     pt.estado_plan AS plan_estado
@@ -1011,13 +2205,161 @@ def resumen_familia(current_user: dict = Depends(get_current_user)):
             )
             ninos = cur.fetchall()
 
+            nino_ids = [str(n["id"]) for n in ninos]
+            progreso_por_nino: Dict[str, Dict[str, Any]] = {}
+            ultima_sesion_por_nino: Dict[str, Dict[str, Any]] = {}
+            recomendaciones_por_nino: Dict[str, List[str]] = {}
+            sesiones_semana = 0
+
+            if nino_ids:
+                cur.execute(
+                    """
+                    SELECT
+                        s.nino_id,
+                        COUNT(DISTINCT s.id) AS sesiones_completadas,
+                        COUNT(ra.id) AS actividades_registradas,
+                        ROUND(
+                            CAST(SUM(COALESCE(ra.aciertos, 0)) AS NUMERIC)
+                            / NULLIF(SUM(NULLIF(ra.repeticiones, 0)), 0),
+                            4
+                        ) AS tasa_aciertos,
+                        AVG(
+                            CASE
+                                WHEN COALESCE(ra.repeticiones, 0) > 0
+                                THEN COALESCE(ra.aciertos, 0)::float / ra.repeticiones
+                                ELSE NULL
+                            END
+                        ) AS cumplimiento,
+                        AVG(COALESCE(ra.nivel_ayuda_requerido, 0)) AS promedio_ayuda,
+                        AVG(COALESCE(ra.tiempo_respuesta, 0)) AS promedio_tiempo_segundos
+                    FROM sesiones s
+                    JOIN resultados_actividad ra ON ra.sesion_id = s.id
+                    WHERE s.nino_id = ANY(%s::uuid[])
+                      AND s.estado = 'completada'
+                      AND s.fecha_inicio >= NOW() - INTERVAL '30 days'
+                    GROUP BY s.nino_id
+                    """,
+                    (nino_ids,),
+                )
+                progreso_por_nino = {
+                    str(row["nino_id"]): row for row in cur.fetchall()
+                }
+
+                cur.execute(
+                    """
+                    SELECT DISTINCT ON (s.nino_id)
+                        s.nino_id,
+                        s.fecha_inicio,
+                        s.estado,
+                        EXTRACT(DAY FROM NOW() - s.fecha_inicio) AS dias_desde_ultima,
+                        ROUND(
+                            CAST(SUM(COALESCE(ra.aciertos, 0)) AS NUMERIC)
+                            / NULLIF(SUM(NULLIF(ra.repeticiones, 0)), 0),
+                            4
+                        ) AS tasa_aciertos
+                    FROM sesiones s
+                    LEFT JOIN resultados_actividad ra ON ra.sesion_id = s.id
+                    WHERE s.nino_id = ANY(%s::uuid[])
+                    GROUP BY s.id, s.nino_id, s.fecha_inicio, s.estado
+                    ORDER BY s.nino_id, s.fecha_inicio DESC
+                    """,
+                    (nino_ids,),
+                )
+                ultima_sesion_por_nino = {
+                    str(row["nino_id"]): row for row in cur.fetchall()
+                }
+
+                cur.execute(
+                    """
+                    SELECT COUNT(*) AS cnt
+                    FROM sesiones s
+                    WHERE s.nino_id = ANY(%s::uuid[])
+                      AND s.fecha_inicio >= date_trunc('week', NOW())
+                    """,
+                    (nino_ids,),
+                )
+                sesiones_semana = int((cur.fetchone() or {}).get("cnt") or 0)
+
+                cur.execute(
+                    """
+                    SELECT
+                        pt.nino_id,
+                        a.id,
+                        a.nombre,
+                        a.tipo,
+                        a.instrucciones,
+                        a.recursos_multimedia,
+                        COALESCE(pa.nivel_dificultad_actual, a.nivel_dificultad) AS nivel_dificultad,
+                        a.duracion_estimada,
+                        COALESCE(pa.modo_ejecucion, 'acompanada') AS modo_ejecucion,
+                        COALESCE(pa.requiere_acompanamiento, TRUE) AS requiere_acompanamiento
+                    FROM planes_terapeuticos pt
+                    JOIN plan_actividades pa ON pa.plan_id = pt.id
+                    JOIN actividades a ON a.id = pa.actividad_id
+                    WHERE pt.nino_id = ANY(%s::uuid[])
+                      AND pt.activo = TRUE
+                      AND pt.estado_plan = 'publicado'
+                      AND pt.publicado_para_tutor = TRUE
+                    ORDER BY pt.nino_id, pa.orden
+                    """,
+                    (nino_ids,),
+                )
+                ninos_por_id = {str(n["id"]): n for n in ninos}
+                for actividad in cur.fetchall():
+                    nino_id = str(actividad["nino_id"])
+                    recomendaciones = recomendaciones_por_nino.setdefault(nino_id, [])
+                    if len(recomendaciones) >= 4:
+                        continue
+                    for recomendacion in _build_recomendaciones_actividad(
+                        ninos_por_id[nino_id],
+                        actividad,
+                    ):
+                        if len(recomendaciones) >= 4:
+                            break
+                        if recomendacion not in recomendaciones:
+                            recomendaciones.append(recomendacion)
+
     pacientes_list = []
+    total_alertas = 0
     for n in ninos:
+        nino_id = str(n["id"])
         perfil = n["perfil_sensorial"] or {}
         triaje = _triaje_from_perfil(perfil)
         scq = triaje.get("scq", {}) if isinstance(triaje.get("scq"), dict) else {}
+        progreso_row = progreso_por_nino.get(nino_id, {})
+        ultima_row = ultima_sesion_por_nino.get(nino_id)
+
+        progreso = {
+            "periodo": "ultimos_30_dias",
+            "sesiones_completadas": int(progreso_row.get("sesiones_completadas") or 0),
+            "actividades_registradas": int(progreso_row.get("actividades_registradas") or 0),
+            "tasa_aciertos": round(_safe_float(progreso_row.get("tasa_aciertos")), 4),
+            "cumplimiento": round(_safe_float(progreso_row.get("cumplimiento")), 4),
+            "promedio_ayuda": round(_safe_float(progreso_row.get("promedio_ayuda")), 2),
+            "promedio_tiempo_segundos": round(_safe_float(progreso_row.get("promedio_tiempo_segundos")), 2),
+        }
+
+        alertas = []
+        if triaje.get("requiere_scq", False) and not triaje.get("scq_completado", False):
+            alertas.append("SCQ pendiente para completar la informacion clinica.")
+        if not n["plan_activo_id"]:
+            alertas.append("Aun no hay un plan terapeutico publicado para la familia.")
+        elif progreso["sesiones_completadas"] == 0:
+            alertas.append("Plan activo pendiente de registrar sesiones en los ultimos 30 dias.")
+        else:
+            if progreso["cumplimiento"] and progreso["cumplimiento"] < 0.6:
+                alertas.append("Cumplimiento bajo en las actividades recientes.")
+            if progreso["tasa_aciertos"] and progreso["tasa_aciertos"] < 0.6:
+                alertas.append("Desempeno bajo en los registros recientes.")
+            if progreso["promedio_ayuda"] >= 3:
+                alertas.append("Nivel de ayuda elevado en las ultimas actividades.")
+
+        if ultima_row and _safe_float(ultima_row.get("dias_desde_ultima")) >= 14:
+            alertas.append("No se registran sesiones recientes en las ultimas dos semanas.")
+
+        total_alertas += len(alertas)
         pacientes_list.append({
-            "id": str(n["id"]),
+            "id": nino_id,
             "nombre": n["nombre"],
             "fecha_nacimiento": n["fecha_nacimiento"].isoformat()
             if n["fecha_nacimiento"]
@@ -1029,7 +2371,19 @@ def resumen_familia(current_user: dict = Depends(get_current_user)):
             "plan_activo": n["plan_activo"],
             "plan_activo_id": str(n["plan_activo_id"]) if n["plan_activo_id"] else None,
             "plan_estado": n["plan_estado"],
-            "ultima_sesion": None,
+            "ultima_sesion": {
+                "fecha": ultima_row["fecha_inicio"].isoformat()
+                if ultima_row and ultima_row["fecha_inicio"]
+                else None,
+                "estado": ultima_row["estado"] if ultima_row else None,
+                "tasa_aciertos": round(
+                    _safe_float(ultima_row.get("tasa_aciertos") if ultima_row else None),
+                    4,
+                ),
+            } if ultima_row else None,
+            "progreso": progreso,
+            "recomendaciones_activas": recomendaciones_por_nino.get(nino_id, [])[:4],
+            "alertas": alertas,
             "hitos": perfil.get("hitos", {}),
             "sensorial": perfil.get("sensorial", {}),
             "intereses": perfil.get("intereses", []),
@@ -1048,8 +2402,8 @@ def resumen_familia(current_user: dict = Depends(get_current_user)):
         "terapeuta_id": None,
         "terapeuta_nombre": None,
         "total_pacientes": len(pacientes_list),
-        "sesiones_esta_semana": 0,
-        "alertas_baja_adherencia": 0,
+        "sesiones_esta_semana": sesiones_semana,
+        "alertas_baja_adherencia": total_alertas,
         "pacientes": pacientes_list,
     }
 
@@ -1057,14 +2411,16 @@ def resumen_familia(current_user: dict = Depends(get_current_user)):
 # ── GET /api/dashboard/familia/notificaciones ──────────────────────────────────
 @router.get("/api/dashboard/familia/notificaciones")
 def obtener_notificaciones(current_user: dict = Depends(get_current_user)):
-    if current_user["role"] not in ("padre_tutor", "tutor"):
+    if current_user["role"] not in ("padre_tutor", "tutor", "padre"):
         raise HTTPException(status_code=403, detail="Solo los tutores pueden acceder a las notificaciones")
     
     with _conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
                 """
-                SELECT id, titulo, mensaje, leido, created_at
+                SELECT
+                    id, titulo, mensaje, leido, created_at, tipo, canal,
+                    estado_envio, entidad_tipo, entidad_id, payload
                 FROM notificaciones
                 WHERE usuario_id = %s
                 ORDER BY created_at DESC
@@ -1080,7 +2436,13 @@ def obtener_notificaciones(current_user: dict = Depends(get_current_user)):
             "titulo": r["titulo"],
             "mensaje": r["mensaje"],
             "leido": r["leido"],
-            "created_at": r["created_at"].isoformat() if r["created_at"] else None
+            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            "tipo": r["tipo"],
+            "canal": r["canal"],
+            "estado_envio": r["estado_envio"],
+            "entidad_tipo": r["entidad_tipo"],
+            "entidad_id": str(r["entidad_id"]) if r["entidad_id"] else None,
+            "payload": r["payload"] or {},
         }
         for r in rows
     ]
@@ -1092,7 +2454,7 @@ def marcar_notificacion_leida(
     notificacion_id: str,
     current_user: dict = Depends(get_current_user),
 ):
-    if current_user["role"] not in ("padre_tutor", "tutor"):
+    if current_user["role"] not in ("padre_tutor", "tutor", "padre"):
         raise HTTPException(status_code=403, detail="Solo los tutores pueden leer notificaciones")
         
     with _conn() as conn:
@@ -1120,6 +2482,7 @@ def registrar_nino(
     req: RegistrarNinoRequest,
     current_user: dict = Depends(get_current_user),
 ):
+    _validar_consentimiento_sensible(req)
     user_id = current_user["id"]
 
     with _conn() as conn:
@@ -1154,6 +2517,36 @@ def registrar_nino(
                 ),
             )
             nino = cur.fetchone()
+            consentimiento = _registrar_consentimiento(
+                cur,
+                nino_id=nino["id"],
+                tutor_id=tutor["id"],
+                usuario_id=current_user["id"],
+                version=req.consentimiento_informado_version,
+                finalidad="registro_perfil_clinico_funcional",
+                payload={
+                    "datos_sensibles": _contiene_datos_sensibles(req),
+                    "uso_no_diagnostico": req.acepta_uso_no_diagnostico,
+                    "minima_recoleccion": True,
+                },
+            )
+            _registrar_auditoria(
+                cur,
+                usuario_id=current_user["id"],
+                rol_usuario=current_user["role"],
+                accion="NINO_REGISTRADO",
+                entidad_afectada="ninos",
+                entidad_id=nino["id"],
+                nino_id=nino["id"],
+                payload_nuevo={
+                    "nombre": req.nombre,
+                    "nivel_cognitivo": req.nivel_cognitivo,
+                    "diagnostico": req.diagnostico,
+                    "estado_clinico": "pendiente_asignacion",
+                    "requiere_scq": triaje.get("requiere_scq", False),
+                    "consentimiento_id": str(consentimiento["id"]),
+                },
+            )
 
     return {
         "id": str(nino["id"]),
@@ -1169,6 +2562,7 @@ def actualizar_nino_familia(
     req: RegistrarNinoRequest,
     current_user: dict = Depends(get_current_user),
 ):
+    _validar_consentimiento_sensible(req)
     user_id = current_user["id"]
 
     with _conn() as conn:
@@ -1222,6 +2616,37 @@ def actualizar_nino_familia(
                 ),
             )
             updated = cur.fetchone()
+            consentimiento = _registrar_consentimiento(
+                cur,
+                nino_id=updated["id"],
+                tutor_id=tutor["id"],
+                usuario_id=current_user["id"],
+                version=req.consentimiento_informado_version,
+                finalidad="actualizacion_perfil_clinico_funcional",
+                payload={
+                    "datos_sensibles": _contiene_datos_sensibles(req),
+                    "uso_no_diagnostico": req.acepta_uso_no_diagnostico,
+                    "minima_recoleccion": True,
+                },
+            )
+            _registrar_auditoria(
+                cur,
+                usuario_id=current_user["id"],
+                rol_usuario=current_user["role"],
+                accion="NINO_ACTUALIZADO_FAMILIA",
+                entidad_afectada="ninos",
+                entidad_id=updated["id"],
+                nino_id=updated["id"],
+                payload_anterior={"perfil_sensorial": nino["perfil_sensorial"]},
+                payload_nuevo={
+                    "nombre": req.nombre,
+                    "fecha_nacimiento": req.fecha_nacimiento,
+                    "nivel_cognitivo": req.nivel_cognitivo,
+                    "diagnostico": req.diagnostico,
+                    "requiere_scq": triaje.get("requiere_scq", False),
+                    "consentimiento_id": str(consentimiento["id"]),
+                },
+            )
 
     return {
         "id": str(updated["id"]),
@@ -1265,6 +2690,16 @@ def eliminar_nino_familia(
             deleted = cur.fetchone()
             if not deleted:
                 raise HTTPException(status_code=404, detail="Niño no encontrado para este tutor")
+            _registrar_auditoria(
+                cur,
+                usuario_id=current_user["id"],
+                rol_usuario=current_user["role"],
+                accion="NINO_DESACTIVADO_FAMILIA",
+                entidad_afectada="ninos",
+                entidad_id=deleted["id"],
+                nino_id=deleted["id"],
+                payload_nuevo={"activo": False},
+            )
 
     return {"ok": True, "nino_id": str(deleted["id"])}
 
@@ -1299,6 +2734,15 @@ def subir_documento_clinico(
             if not nino:
                 raise HTTPException(status_code=404, detail="Niño no encontrado para este tutor")
 
+            if not _tiene_consentimiento_activo(cur, nino_id):
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "codigo": "consentimiento_datos_sensibles_requerido",
+                        "mensaje": "Debes confirmar consentimiento informado antes de adjuntar documentos clinicos.",
+                    },
+                )
+
             perfil = nino["perfil_sensorial"] or {}
             documentos = perfil.get("documentos_clinicos") or {}
             documentos[tipo] = {
@@ -1321,6 +2765,21 @@ def subir_documento_clinico(
                 WHERE id = %s
                 """,
                 (Json(perfil), nino_id),
+            )
+            _registrar_auditoria(
+                cur,
+                usuario_id=current_user["id"],
+                rol_usuario=current_user["role"],
+                accion="DOCUMENTO_CLINICO_ADJUNTADO",
+                entidad_afectada="ninos",
+                entidad_id=nino_id,
+                nino_id=nino_id,
+                payload_nuevo={
+                    "tipo": tipo,
+                    "archivo": file.filename,
+                    "content_type": file.content_type,
+                    "url": file_url,
+                },
             )
 
     return {"ok": True, "tipo": tipo, "url": file_url}
@@ -1438,7 +2897,7 @@ def crear_actividad_ocupacional(
             if req.plan_id:
                 cur.execute(
                     """
-                    SELECT pt.id, n.nivel_tea_validado
+                    SELECT pt.id, pt.nino_id, n.nivel_tea_validado
                     FROM planes_terapeuticos pt
                     JOIN ninos n ON n.id = pt.nino_id
                     WHERE pt.id = %s
@@ -1487,6 +2946,23 @@ def crear_actividad_ocupacional(
                 ),
             )
             actividad = cur.fetchone()
+            _registrar_auditoria(
+                cur,
+                usuario_id=current_user["id"],
+                rol_usuario=current_user["role"],
+                accion="ACTIVIDAD_OCUPACIONAL_CREADA",
+                entidad_afectada="actividades",
+                entidad_id=actividad["id"],
+                nino_id=plan_context["nino_id"] if plan_context else None,
+                payload_nuevo={
+                    "nombre": actividad["nombre"],
+                    "tipo": actividad["tipo"],
+                    "nivel_dificultad": actividad["nivel_dificultad"],
+                    "duracion_estimada": actividad["duracion_estimada"],
+                    "plan_id": req.plan_id,
+                    "asociado": bool(req.plan_id),
+                },
+            )
 
             asociado = False
             if req.plan_id:
@@ -1520,6 +2996,21 @@ def crear_actividad_ocupacional(
                     ),
                 )
                 asociado = True
+                _registrar_auditoria(
+                    cur,
+                    usuario_id=current_user["id"],
+                    rol_usuario=current_user["role"],
+                    accion="ACTIVIDAD_ASOCIADA_PLAN",
+                    entidad_afectada="plan_actividades",
+                    entidad_id=f"{req.plan_id}:{actividad['id']}",
+                    nino_id=plan_context["nino_id"],
+                    payload_nuevo={
+                        "plan_id": req.plan_id,
+                        "actividad_id": str(actividad["id"]),
+                        "orden": orden,
+                        "nivel_dificultad_actual": dificultad,
+                    },
+                )
 
     return {
         "id": str(actividad["id"]),
@@ -1555,7 +3046,7 @@ def asociar_actividad_a_plan(
 
             cur.execute(
                 """
-                SELECT pt.id, n.nivel_tea_validado
+                SELECT pt.id, pt.nino_id, n.nivel_tea_validado
                 FROM planes_terapeuticos pt
                 JOIN ninos n ON n.id = pt.nino_id
                 WHERE pt.id = %s AND pt.terapeuta_id = %s AND pt.activo = TRUE
@@ -1618,6 +3109,21 @@ def asociar_actividad_a_plan(
                     ejecucion["requiere_acompanamiento"],
                 ),
             )
+            _registrar_auditoria(
+                cur,
+                usuario_id=current_user["id"],
+                rol_usuario=current_user["role"],
+                accion="ACTIVIDAD_ASOCIADA_PLAN",
+                entidad_afectada="plan_actividades",
+                entidad_id=f"{plan_id}:{actividad_id}",
+                nino_id=plan_context["nino_id"],
+                payload_nuevo={
+                    "plan_id": plan_id,
+                    "actividad_id": actividad_id,
+                    "orden": orden,
+                    "nivel_dificultad_actual": actividad["nivel_dificultad"],
+                },
+            )
 
     return {"ok": True, "plan_id": plan_id, "actividad_id": actividad_id}
 
@@ -1640,7 +3146,7 @@ def desasociar_actividad_de_plan(
 
             cur.execute(
                 """
-                SELECT pt.id FROM planes_terapeuticos pt
+                SELECT pt.id, pt.nino_id FROM planes_terapeuticos pt
                 WHERE pt.id = %s AND pt.terapeuta_id = %s AND pt.activo = TRUE
                 """,
                 (plan_id, ter["id"]),
@@ -1656,6 +3162,17 @@ def desasociar_actividad_de_plan(
             deleted = cur.fetchone()
             if not deleted:
                 raise HTTPException(status_code=404, detail="Actividad no asociada a este plan")
+            _registrar_auditoria(
+                cur,
+                usuario_id=current_user["id"],
+                rol_usuario=current_user["role"],
+                accion="ACTIVIDAD_DESASOCIADA_PLAN",
+                entidad_afectada="plan_actividades",
+                entidad_id=f"{plan_id}:{actividad_id}",
+                nino_id=plan_context["nino_id"],
+                payload_anterior={"plan_id": plan_id, "actividad_id": actividad_id},
+                payload_nuevo={"eliminada": True},
+            )
 
     return {"ok": True, "plan_id": plan_id, "actividad_id": actividad_id}
 
@@ -1681,7 +3198,7 @@ def reemplazar_actividad_en_plan(
 
             cur.execute(
                 """
-                SELECT pt.id, n.nivel_tea_validado, pa.orden
+                SELECT pt.id, pt.nino_id, n.nivel_tea_validado, pa.orden
                 FROM planes_terapeuticos pt
                 JOIN ninos n ON n.id = pt.nino_id
                 JOIN plan_actividades pa ON pa.plan_id = pt.id
@@ -1746,6 +3263,25 @@ def reemplazar_actividad_en_plan(
                     plan_id,
                     actividad_id,
                 ),
+            )
+            _registrar_auditoria(
+                cur,
+                usuario_id=current_user["id"],
+                rol_usuario=current_user["role"],
+                accion="ACTIVIDAD_REEMPLAZADA_PLAN",
+                entidad_afectada="plan_actividades",
+                entidad_id=f"{plan_id}:{nueva_actividad_id}",
+                nino_id=plan_context["nino_id"],
+                payload_anterior={
+                    "plan_id": plan_id,
+                    "actividad_id": actividad_id,
+                },
+                payload_nuevo={
+                    "plan_id": plan_id,
+                    "actividad_id": nueva_actividad_id,
+                    "nivel_dificultad_actual": nueva["nivel_dificultad"],
+                    "modo_ejecucion": ejecucion["modo_ejecucion"],
+                },
             )
 
     return {
@@ -1859,6 +3395,17 @@ def actualizar_dificultad_actividad_plan(
                 ),
             )
             decision = cur.fetchone()
+            _registrar_auditoria(
+                cur,
+                usuario_id=current_user["id"],
+                rol_usuario=current_user["role"],
+                accion="DIFICULTAD_ACTIVIDAD_ACTUALIZADA",
+                entidad_afectada="plan_actividades",
+                entidad_id=f"{plan_id}:{actividad_id}",
+                nino_id=row["nino_id"],
+                payload_anterior={"dificultad_actual": actual},
+                payload_nuevo={**detalle, "decision_id": str(decision["id"])},
+            )
 
     return {
         "ok": True,
@@ -1944,6 +3491,19 @@ def validar_nivel_tea(
                     "VALIDAR_NIVEL_TEA",
                     json.dumps(detalle, ensure_ascii=False),
                 ),
+            )
+            _registrar_auditoria(
+                cur,
+                usuario_id=current_user["id"],
+                rol_usuario=current_user["role"],
+                accion="NIVEL_TEA_VALIDADO",
+                entidad_afectada="ninos",
+                entidad_id=nino_id,
+                nino_id=nino_id,
+                payload_nuevo={
+                    **detalle,
+                    "estado_clinico": nino["estado_clinico"],
+                },
             )
 
     return {
@@ -2063,6 +3623,20 @@ def actualizar_estado_plan(
                     json.dumps(detalle, ensure_ascii=False, default=str),
                 ),
             )
+            _registrar_auditoria(
+                cur,
+                usuario_id=current_user["id"],
+                rol_usuario=current_user["role"],
+                accion="ESTADO_PLAN_ACTUALIZADO",
+                entidad_afectada="planes_terapeuticos",
+                entidad_id=plan["id"],
+                nino_id=plan["nino_id"],
+                payload_nuevo={
+                    **detalle,
+                    "estado_plan": plan["estado_plan"],
+                    "publicado_para_tutor": plan["publicado_para_tutor"],
+                },
+            )
 
     return {
         "ok": True,
@@ -2099,7 +3673,8 @@ def obtener_plan_activo(
                         pt.nivel_dificultad_actual, pt.estado_plan,
                         pt.aprobado_at, pt.publicado_at, pt.publicado_para_tutor,
                         pt.limite_actividades, pt.limite_duracion_segundos,
-                        n.nivel_tea_validado
+                        n.nivel_tea_validado, n.nivel_cognitivo,
+                        n.perfil_sensorial, n.objetivos_intervencion
                     FROM planes_terapeuticos pt
                     JOIN ninos n ON n.id = pt.nino_id
                     WHERE pt.nino_id = %s
@@ -2127,7 +3702,8 @@ def obtener_plan_activo(
                         pt.nivel_dificultad_actual, pt.estado_plan,
                         pt.aprobado_at, pt.publicado_at, pt.publicado_para_tutor,
                         pt.limite_actividades, pt.limite_duracion_segundos,
-                        n.nivel_tea_validado
+                        n.nivel_tea_validado, n.nivel_cognitivo,
+                        n.perfil_sensorial, n.objetivos_intervencion
                     FROM planes_terapeuticos pt
                     JOIN ninos n ON n.id = pt.nino_id
                     WHERE pt.nino_id = %s
@@ -2217,7 +3793,11 @@ def obtener_plan_activo(
                 "nivel_dificultad": a["nivel_dificultad"],
                 "nivel_catalogo": a["nivel_catalogo"],
                 "duracion_estimada": a["duracion_estimada"],
-                "materiales": (a["recursos_multimedia"] or {}).get("materiales", []),
+                "materiales": _json_dict(a["recursos_multimedia"]).get("materiales", []),
+                "recomendaciones_adaptadas": _build_recomendaciones_actividad(
+                    plan,
+                    a,
+                ),
                 "modo_ejecucion": a["modo_ejecucion"],
                 "requiere_acompanamiento": a["requiere_acompanamiento"],
                 "completada": a["completada"],
@@ -2266,7 +3846,7 @@ def crear_sesion(
 
             cur.execute(
                 """
-                SELECT pt.id, pt.nino_id, pt.nivel_dificultad_actual
+                SELECT pt.id, pt.nino_id, pt.terapeuta_id, pt.nivel_dificultad_actual
                 FROM planes_terapeuticos pt
                 JOIN ninos n ON n.id = pt.nino_id
                 WHERE pt.id = %s
@@ -2332,6 +3912,49 @@ def crear_sesion(
                         },
                     )
 
+            if req.client_event_id:
+                cur.execute(
+                    """
+                    SELECT
+                        s.id AS sesion_id,
+                        s.client_event_id,
+                        ra.actividad_id,
+                        ra.aciertos,
+                        ra.repeticiones,
+                        COALESCE(pa.nivel_dificultad_actual, a.nivel_dificultad, pt.nivel_dificultad_actual) AS nivel_dificultad_actual
+                    FROM sesiones s
+                    JOIN resultados_actividad ra ON ra.sesion_id = s.id
+                    JOIN planes_terapeuticos pt ON pt.id = s.plan_id
+                    JOIN actividades a ON a.id = ra.actividad_id
+                    LEFT JOIN plan_actividades pa
+                      ON pa.plan_id = s.plan_id
+                     AND pa.actividad_id = ra.actividad_id
+                    WHERE s.client_event_id = %s::uuid
+                      AND s.nino_id = %s
+                      AND s.plan_id = %s
+                      AND s.estado = 'completada'
+                    ORDER BY s.fecha_inicio DESC
+                    LIMIT 1
+                    """,
+                    (str(req.client_event_id), req.nino_id, req.plan_id),
+                )
+                evento_existente = cur.fetchone()
+                if evento_existente:
+                    total_intentos = int(evento_existente["repeticiones"] or 0)
+                    total_aciertos = int(evento_existente["aciertos"] or 0)
+                    tasa = round(total_aciertos / total_intentos, 4) if total_intentos else 0
+                    return {
+                        "ok": True,
+                        "ya_registrada": True,
+                        "sesion_id": str(evento_existente["sesion_id"]),
+                        "client_event_id": str(evento_existente["client_event_id"]),
+                        "total_aciertos": total_aciertos,
+                        "total_intentos": total_intentos,
+                        "tasa_aciertos": tasa,
+                        "nivel_dificultad_recomendado": evento_existente["nivel_dificultad_actual"],
+                        "ajustes_dificultad": [],
+                    }
+
             cur.execute(
                 """
                 SELECT
@@ -2365,6 +3988,7 @@ def crear_sesion(
                     "ok": True,
                     "ya_registrada": True,
                     "sesion_id": str(existente["sesion_id"]),
+                    "client_event_id": str(req.client_event_id) if req.client_event_id else None,
                     "total_aciertos": total_aciertos,
                     "total_intentos": total_intentos,
                     "tasa_aciertos": tasa,
@@ -2376,11 +4000,19 @@ def crear_sesion(
                 """
                 INSERT INTO sesiones
                     (nino_id, plan_id, fecha_inicio, fecha_fin, estado, sync_at,
-                     ejecutado_por_rol, ejecutado_por_usuario_id, origen_registro)
-                VALUES (%s, %s, NOW(), NOW(), 'completada', NOW(), %s, %s, 'familia_app')
+                     ejecutado_por_rol, ejecutado_por_usuario_id, origen_registro,
+                     client_event_id)
+                VALUES (%s, %s, NOW(), NOW(), 'completada', NOW(), %s, %s, %s, %s)
                 RETURNING id
                 """,
-                (req.nino_id, req.plan_id, current_user["role"], current_user["id"]),
+                (
+                    req.nino_id,
+                    req.plan_id,
+                    current_user["role"],
+                    current_user["id"],
+                    "familia_app_offline" if req.client_event_id else "familia_app",
+                    str(req.client_event_id) if req.client_event_id else None,
+                ),
             )
             sesion = cur.fetchone()
 
@@ -2419,11 +4051,40 @@ def crear_sesion(
                 if ajuste:
                     ajustes.append(ajuste)
 
+            _evaluar_alertas_clinicas(cur, plan["terapeuta_id"], nino_id=req.nino_id)
+            _registrar_auditoria(
+                cur,
+                usuario_id=current_user["id"],
+                rol_usuario=current_user["role"],
+                accion="SESION_TERAPEUTICA_REGISTRADA",
+                entidad_afectada="sesiones",
+                entidad_id=sesion["id"],
+                nino_id=req.nino_id,
+                payload_nuevo={
+                    "plan_id": req.plan_id,
+                    "client_event_id": str(req.client_event_id) if req.client_event_id else None,
+                    "origen_registro": "familia_app_offline" if req.client_event_id else "familia_app",
+                    "total_aciertos": total_aciertos,
+                    "total_intentos": total_intentos,
+                    "actividades": [
+                        {
+                            "actividad_id": resultado.actividad_id,
+                            "aciertos": resultado.aciertos,
+                            "repeticiones": resultado.repeticiones,
+                            "tiempo_respuesta": resultado.tiempo_respuesta,
+                            "nivel_ayuda_requerido": resultado.nivel_ayuda_requerido,
+                        }
+                        for resultado in req.resultados
+                    ],
+                },
+            )
+
     tasa = round(total_aciertos / total_intentos, 4) if total_intentos else 0
     nivel_recomendado = ajustes[-1]["dificultad_sugerida"] if ajustes else plan["nivel_dificultad_actual"]
     return {
         "ok": True,
         "sesion_id": str(sesion["id"]),
+        "client_event_id": str(req.client_event_id) if req.client_event_id else None,
         "total_aciertos": total_aciertos,
         "total_intentos": total_intentos,
         "tasa_aciertos": tasa,
@@ -2571,6 +4232,16 @@ def solicitar_ajuste_dificultad(
                     f"La familia solicito {direccion} la dificultad de {row['actividad_nombre']} para {row['nino_nombre']}.",
                     row["terapeuta_id"],
                 ),
+            )
+            _registrar_auditoria(
+                cur,
+                usuario_id=current_user["id"],
+                rol_usuario=current_user["role"],
+                accion="SOLICITUD_AJUSTE_DIFICULTAD_CREADA",
+                entidad_afectada="decisiones_clinicas",
+                entidad_id=decision["id"],
+                nino_id=row["nino_id"],
+                payload_nuevo={**detalle, "decision_id": str(decision["id"])},
             )
 
     return {
@@ -2801,6 +4472,24 @@ def resolver_solicitud_ajuste(
                 (ter["id"], solicitud["nino_id"], "resolver_solicitud_ajuste", accion, json.dumps(resolucion, ensure_ascii=False)),
             )
             decision = cur.fetchone()
+            _registrar_auditoria(
+                cur,
+                usuario_id=current_user["id"],
+                rol_usuario=current_user["role"],
+                accion="SOLICITUD_AJUSTE_DIFICULTAD_RESUELTA",
+                entidad_afectada="decisiones_clinicas",
+                entidad_id=decision["id"],
+                nino_id=solicitud["nino_id"],
+                payload_anterior={
+                    "solicitud_id": decision_id,
+                    "accion_solicitada": solicitud["accion"],
+                },
+                payload_nuevo={
+                    **resolucion,
+                    "decision_id": str(decision["id"]),
+                    "estado": "aprobada" if req.aceptar else "rechazada",
+                },
+            )
 
     return {
         "ok": True,
@@ -2873,6 +4562,21 @@ def actualizar_perfil_clinico(
             row = cur.fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="Niño no encontrado")
+            _registrar_auditoria(
+                cur,
+                usuario_id=current_user["id"],
+                rol_usuario=current_user["role"],
+                accion="PERFIL_CLINICO_ACTUALIZADO",
+                entidad_afectada="ninos",
+                entidad_id=nino_id,
+                nino_id=nino_id,
+                payload_anterior={"perfil_sensorial": existing_perfil},
+                payload_nuevo={
+                    "campos_actualizados": list(updates.keys()),
+                    "estado_clinico": row["estado_clinico"],
+                    "observaciones_clinicas": bool(observaciones),
+                },
+            )
 
     return {
         "ok": True,
@@ -3070,6 +4774,26 @@ def generar_plan_ia(
                         ejecucion["requiere_acompanamiento"],
                     ),
                 )
+            _registrar_auditoria(
+                cur,
+                usuario_id=current_user["id"],
+                rol_usuario=current_user["role"],
+                accion="PLAN_TERAPEUTICO_GENERADO",
+                entidad_afectada="planes_terapeuticos",
+                entidad_id=plan["id"],
+                nino_id=nino_id,
+                payload_anterior={
+                    "plan_activo_anterior": str(existing["id"]) if existing else None,
+                },
+                payload_nuevo={
+                    "sesion_numero": siguiente_sesion,
+                    "dificultad_inicial": dificultad_ia,
+                    "nivel_dificultad_db": nivel_dificultad_db,
+                    "confianza_ia": confianza,
+                    "actividades": [str(act["id"]) for act in acts],
+                    "estado_plan": "borrador",
+                },
+            )
 
     return {
         "mensaje": f"Sesion {siguiente_sesion} generada con exito",
@@ -3102,6 +4826,7 @@ def obtener_perfil_nino(
                     n.diagnostico, n.perfil_sensorial, n.objetivos_intervencion,
                     n.estado_clinico, n.documento_diagnostico,
                     n.nivel_tea_validado, n.perfil_validado_at,
+                    n.terapeuta_id, n.tutor_id,
                     pt.id AS plan_activo_id,
                     pt.estado_plan AS plan_estado
                 FROM ninos n
@@ -3114,6 +4839,18 @@ def obtener_perfil_nino(
             nino = cur.fetchone()
             if not nino:
                 raise HTTPException(status_code=404, detail="Niño no encontrado")
+            if current_user["role"] == "terapeuta":
+                cur.execute("SELECT id FROM terapeutas WHERE usuario_id = %s", (current_user["id"],))
+                ter = cur.fetchone()
+                if not ter or nino["terapeuta_id"] != ter["id"]:
+                    raise HTTPException(status_code=403, detail="Acceso denegado al perfil del nino")
+            elif current_user["role"] in ("padre_tutor", "tutor", "padre"):
+                cur.execute("SELECT id FROM padres_tutores WHERE usuario_id = %s", (current_user["id"],))
+                tutor = cur.fetchone()
+                if not tutor or nino["tutor_id"] != tutor["id"]:
+                    raise HTTPException(status_code=403, detail="Acceso denegado al perfil del nino")
+            elif current_user["role"] != "admin":
+                raise HTTPException(status_code=403, detail="Acceso denegado")
 
     sensorial = nino["perfil_sensorial"] or {}
     triaje = _triaje_from_perfil(sensorial)
@@ -3159,6 +4896,7 @@ def obtener_progreso(
     periodo: str = "Esta semana",
     current_user: dict = Depends(get_current_user),
 ):
+    _autorizar_acceso_nino(nino_id, current_user)
     with _conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             # Filtro de fecha según período
@@ -3189,7 +4927,7 @@ def obtener_progreso(
 
             # Historia de aciertos por sesión (últimas 8)
             cur.execute(
-                """
+                f"""
                 SELECT
                     s.id,
                     ROUND(
@@ -3198,7 +4936,9 @@ def obtener_progreso(
                     ) AS tasa
                 FROM sesiones s
                 JOIN resultados_actividad ra ON ra.sesion_id = s.id
-                WHERE s.nino_id = %s AND s.estado = 'completada'
+                WHERE s.nino_id = %s
+                  AND s.fecha_inicio >= {fecha_desde}
+                  AND s.estado = 'completada'
                 GROUP BY s.id, s.fecha_inicio
                 ORDER BY s.fecha_inicio DESC
                 LIMIT 8
@@ -3207,6 +4947,125 @@ def obtener_progreso(
             )
             historia_rows = cur.fetchall()
 
+            cur.execute(
+                f"""
+                SELECT
+                    COALESCE(NULLIF(a.tipo, ''), 'Sin categoria') AS habilidad,
+                    COUNT(DISTINCT s.id) AS sesiones,
+                    COUNT(ra.id) AS actividades,
+                    ROUND(
+                        CAST(SUM(ra.aciertos) AS NUMERIC) /
+                        NULLIF(SUM(ra.repeticiones), 0), 4
+                    ) AS tasa_aciertos,
+                    AVG(COALESCE(ra.tiempo_respuesta, 0)) AS promedio_tiempo,
+                    AVG(COALESCE(ra.nivel_ayuda_requerido, 0)) AS promedio_ayuda,
+                    ROUND(
+                        CAST(COUNT(*) FILTER (
+                            WHERE ra.repeticiones > 0
+                              AND CAST(ra.aciertos AS NUMERIC) / ra.repeticiones >= 0.8
+                        ) AS NUMERIC) / NULLIF(COUNT(*), 0), 4
+                    ) AS cumplimiento
+                FROM sesiones s
+                JOIN resultados_actividad ra ON ra.sesion_id = s.id
+                JOIN actividades a ON a.id = ra.actividad_id
+                WHERE s.nino_id = %s
+                  AND s.fecha_inicio >= {fecha_desde}
+                  AND s.estado = 'completada'
+                GROUP BY habilidad
+                ORDER BY habilidad ASC
+                """,
+                (nino_id,),
+            )
+            habilidades_rows = cur.fetchall()
+
+            cur.execute(
+                f"""
+                WITH sesiones_filtradas AS (
+                    SELECT s.id, s.plan_id, s.fecha_inicio
+                    FROM sesiones s
+                    WHERE s.nino_id = %s
+                      AND s.fecha_inicio >= {fecha_desde}
+                      AND s.estado = 'completada'
+                )
+                SELECT
+                    sf.id AS sesion_id,
+                    sf.plan_id,
+                    sf.fecha_inicio,
+                    ROUND(
+                        CAST(SUM(ra.aciertos) AS NUMERIC) /
+                        NULLIF(SUM(ra.repeticiones), 0), 4
+                    ) AS tasa_aciertos,
+                    SUM(ra.aciertos) AS total_aciertos,
+                    SUM(ra.repeticiones) AS total_intentos,
+                    AVG(COALESCE(ra.tiempo_respuesta, 0)) AS promedio_tiempo,
+                    AVG(COALESCE(ra.nivel_ayuda_requerido, 0)) AS promedio_ayuda,
+                    ROUND(
+                        CAST(COUNT(*) FILTER (
+                            WHERE ra.repeticiones > 0
+                              AND CAST(ra.aciertos AS NUMERIC) / ra.repeticiones >= 0.8
+                        ) AS NUMERIC) / NULLIF(COUNT(*), 0), 4
+                    ) AS cumplimiento
+                FROM sesiones_filtradas sf
+                JOIN resultados_actividad ra ON ra.sesion_id = sf.id
+                GROUP BY sf.id, sf.plan_id, sf.fecha_inicio
+                ORDER BY sf.fecha_inicio DESC
+                LIMIT 12
+                """,
+                (nino_id,),
+            )
+            sesiones_rows = cur.fetchall()
+
+            sesion_ids = [row["sesion_id"] for row in sesiones_rows]
+            habilidades_por_sesion: Dict[str, List[Dict[str, Any]]] = {}
+            observaciones_rows = []
+            if sesion_ids:
+                cur.execute(
+                    """
+                    SELECT
+                        ra.sesion_id,
+                        COALESCE(NULLIF(a.tipo, ''), 'Sin categoria') AS habilidad,
+                        COUNT(ra.id) AS actividades,
+                        ROUND(
+                            CAST(SUM(ra.aciertos) AS NUMERIC) /
+                            NULLIF(SUM(ra.repeticiones), 0), 4
+                        ) AS tasa_aciertos,
+                        AVG(COALESCE(ra.tiempo_respuesta, 0)) AS promedio_tiempo,
+                        AVG(COALESCE(ra.nivel_ayuda_requerido, 0)) AS promedio_ayuda
+                    FROM resultados_actividad ra
+                    JOIN actividades a ON a.id = ra.actividad_id
+                    WHERE ra.sesion_id = ANY(%s::uuid[])
+                    GROUP BY ra.sesion_id, habilidad
+                    ORDER BY habilidad ASC
+                    """,
+                    (sesion_ids,),
+                )
+                for row in cur.fetchall():
+                    sid = str(row["sesion_id"])
+                    habilidades_por_sesion.setdefault(sid, []).append({
+                        "habilidad": row["habilidad"],
+                        "actividades": int(row["actividades"] or 0),
+                        "tasa_aciertos": float(row["tasa_aciertos"] or 0),
+                        "promedio_tiempo": float(row["promedio_tiempo"] or 0),
+                        "promedio_ayuda": float(row["promedio_ayuda"] or 0),
+                    })
+
+                cur.execute(
+                    """
+                    SELECT
+                        ra.observaciones,
+                        ra.timestamp,
+                        a.nombre AS actividad_nombre
+                    FROM resultados_actividad ra
+                    JOIN actividades a ON a.id = ra.actividad_id
+                    WHERE ra.sesion_id = ANY(%s::uuid[])
+                      AND NULLIF(TRIM(COALESCE(ra.observaciones, '')), '') IS NOT NULL
+                    ORDER BY ra.timestamp DESC
+                    LIMIT 5
+                    """,
+                    (sesion_ids,),
+                )
+                observaciones_rows = cur.fetchall()
+
     sesiones = resumen["sesiones_completadas"] or 0
     tasa = float(resumen["tasa_aciertos"]) if resumen["tasa_aciertos"] else 0.0
     historia = [float(r["tasa"]) for r in reversed(historia_rows) if r["tasa"] is not None]
@@ -3214,18 +5073,493 @@ def obtener_progreso(
         historia = [0.0]
 
     # Adherencia simplificada: proporción de sesiones completadas vs esperadas (objetivo 5/semana)
-    adherencia = min(1.0, sesiones / 5.0) if periodo == "Esta semana" else min(1.0, tasa)
+    expected_by_period = {
+        "Esta semana": 5.0,
+        "Este mes": 20.0,
+    }
+    adherencia = min(
+        1.0,
+        sesiones / expected_by_period.get(periodo, max(float(sesiones), 1.0)),
+    )
+
+    habilidades = [
+        {
+            "habilidad": row["habilidad"],
+            "sesiones": int(row["sesiones"] or 0),
+            "actividades": int(row["actividades"] or 0),
+            "tasa_aciertos": float(row["tasa_aciertos"] or 0),
+            "promedio_tiempo": float(row["promedio_tiempo"] or 0),
+            "promedio_ayuda": float(row["promedio_ayuda"] or 0),
+            "cumplimiento": float(row["cumplimiento"] or 0),
+        }
+        for row in habilidades_rows
+    ]
+
+    sesiones_detalle = []
+    for index, row in enumerate(reversed(sesiones_rows), start=1):
+        sid = str(row["sesion_id"])
+        fecha = row["fecha_inicio"]
+        sesiones_detalle.append({
+            "sesion_id": sid,
+            "sesion_numero": index,
+            "plan_id": str(row["plan_id"]),
+            "fecha": fecha.isoformat() if fecha else None,
+            "tasa_aciertos": float(row["tasa_aciertos"] or 0),
+            "total_aciertos": int(row["total_aciertos"] or 0),
+            "total_intentos": int(row["total_intentos"] or 0),
+            "promedio_tiempo": float(row["promedio_tiempo"] or 0),
+            "promedio_ayuda": float(row["promedio_ayuda"] or 0),
+            "cumplimiento": float(row["cumplimiento"] or 0),
+            "habilidades": habilidades_por_sesion.get(sid, []),
+        })
 
     return {
+        "periodo": periodo,
         "sesiones_completadas": sesiones,
         "tasa_aciertos": tasa,
         "adherencia": adherencia,
         "historia_aciertos": historia,
+        "metricas_por_habilidad": habilidades,
+        "sesiones": sesiones_detalle,
+        "observaciones_recientes": [
+            {
+                "actividad": row["actividad_nombre"],
+                "observacion": row["observaciones"],
+                "fecha": row["timestamp"].isoformat() if row["timestamp"] else None,
+            }
+            for row in observaciones_rows
+        ],
+    }
+
+
+# ── GET /api/dashboard/terapeuta/ninos/{nino_id}/reporte-terapeutico ──────────
+# Genera reportes exportables del historial terapeutico real del niño.
+
+@router.get("/api/dashboard/terapeuta/ninos/{nino_id}/reporte-terapeutico")
+def generar_reporte_terapeutico(
+    nino_id: str,
+    formato: str = "json",
+    inicio: Optional[datetime] = None,
+    fin: Optional[datetime] = None,
+    current_user: dict = Depends(get_current_user),
+):
+    if current_user["role"] != "terapeuta":
+        raise HTTPException(status_code=403, detail="Solo terapeutas pueden generar reportes terapeuticos")
+
+    formato = (formato or "json").strip().lower()
+    if formato not in ("json", "pdf"):
+        raise HTTPException(status_code=400, detail="Formato no soportado. Usa json o pdf.")
+
+    periodo_fin = fin or datetime.utcnow()
+    periodo_inicio = inicio or (periodo_fin - timedelta(days=90))
+    if periodo_inicio > periodo_fin:
+        raise HTTPException(status_code=400, detail="La fecha de inicio no puede ser posterior a la fecha final")
+
+    with _conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT id FROM terapeutas WHERE usuario_id = %s", (current_user["id"],))
+            terapeuta = cur.fetchone()
+            if not terapeuta:
+                raise HTTPException(status_code=404, detail="Perfil de terapeuta no encontrado")
+
+            cur.execute(
+                """
+                SELECT
+                    n.id,
+                    n.nombre,
+                    n.fecha_nacimiento,
+                    n.nivel_cognitivo,
+                    n.diagnostico,
+                    n.nivel_tea_validado
+                FROM ninos n
+                WHERE n.id = %s
+                  AND n.terapeuta_id = %s
+                  AND n.activo = TRUE
+                """,
+                (nino_id, terapeuta["id"]),
+            )
+            nino = cur.fetchone()
+            if not nino:
+                raise HTTPException(status_code=404, detail="Niño no encontrado para este terapeuta")
+
+            cur.execute(
+                """
+                SELECT
+                    s.id AS sesion_id,
+                    s.plan_id,
+                    pt.nombre AS plan_nombre,
+                    s.fecha_inicio,
+                    s.fecha_fin,
+                    COUNT(ra.id) AS actividades,
+                    SUM(ra.aciertos) AS total_aciertos,
+                    SUM(ra.repeticiones) AS total_intentos,
+                    AVG(COALESCE(ra.tiempo_respuesta, 0)) AS promedio_tiempo,
+                    AVG(COALESCE(ra.nivel_ayuda_requerido, 0)) AS promedio_ayuda,
+                    ROUND(
+                        CAST(SUM(ra.aciertos) AS NUMERIC) /
+                        NULLIF(SUM(ra.repeticiones), 0), 4
+                    ) AS tasa_aciertos,
+                    ROUND(
+                        CAST(COUNT(*) FILTER (
+                            WHERE ra.repeticiones > 0
+                              AND CAST(ra.aciertos AS NUMERIC) / ra.repeticiones >= 0.8
+                        ) AS NUMERIC) / NULLIF(COUNT(*), 0), 4
+                    ) AS cumplimiento
+                FROM sesiones s
+                JOIN resultados_actividad ra ON ra.sesion_id = s.id
+                JOIN planes_terapeuticos pt ON pt.id = s.plan_id
+                WHERE s.nino_id = %s
+                  AND s.estado = 'completada'
+                  AND s.fecha_inicio >= %s
+                  AND s.fecha_inicio <= %s
+                GROUP BY s.id, s.plan_id, pt.nombre, s.fecha_inicio, s.fecha_fin
+                ORDER BY s.fecha_inicio ASC
+                """,
+                (nino_id, periodo_inicio, periodo_fin),
+            )
+            sesiones_rows = cur.fetchall()
+
+            cur.execute(
+                """
+                SELECT
+                    s.id AS sesion_id,
+                    s.fecha_inicio,
+                    ra.timestamp,
+                    a.id AS actividad_id,
+                    a.nombre AS actividad_nombre,
+                    COALESCE(NULLIF(a.tipo, ''), 'Sin categoria') AS habilidad,
+                    ra.aciertos,
+                    ra.repeticiones,
+                    COALESCE(ra.tiempo_respuesta, 0) AS tiempo_respuesta,
+                    COALESCE(ra.nivel_ayuda_requerido, 0) AS nivel_ayuda_requerido,
+                    ra.nivel_dificultad_usado,
+                    ra.observaciones
+                FROM sesiones s
+                JOIN resultados_actividad ra ON ra.sesion_id = s.id
+                JOIN actividades a ON a.id = ra.actividad_id
+                WHERE s.nino_id = %s
+                  AND s.estado = 'completada'
+                  AND s.fecha_inicio >= %s
+                  AND s.fecha_inicio <= %s
+                ORDER BY s.fecha_inicio ASC, ra.timestamp ASC
+                """,
+                (nino_id, periodo_inicio, periodo_fin),
+            )
+            actividades_rows = cur.fetchall()
+
+    sesiones = []
+    for row in sesiones_rows:
+        fecha_inicio = row["fecha_inicio"]
+        fecha_fin = row["fecha_fin"]
+        sesiones.append({
+            "sesion_id": str(row["sesion_id"]),
+            "plan_id": str(row["plan_id"]),
+            "plan_nombre": row["plan_nombre"],
+            "fecha": fecha_inicio.isoformat() if fecha_inicio else None,
+            "fecha_fin": fecha_fin.isoformat() if fecha_fin else None,
+            "actividades": int(row["actividades"] or 0),
+            "total_aciertos": int(row["total_aciertos"] or 0),
+            "total_intentos": int(row["total_intentos"] or 0),
+            "promedio_tiempo_segundos": _safe_float(row["promedio_tiempo"]),
+            "promedio_ayuda": _safe_float(row["promedio_ayuda"]),
+            "tasa_aciertos": _safe_float(row["tasa_aciertos"]),
+            "cumplimiento": _safe_float(row["cumplimiento"]),
+        })
+
+    total_aciertos = sum(item["total_aciertos"] for item in sesiones)
+    total_intentos = sum(item["total_intentos"] for item in sesiones)
+    actividades_total = len(actividades_rows)
+    cumplidas = sum(
+        1
+        for row in actividades_rows
+        if int(row["repeticiones"] or 0) > 0
+        and int(row["aciertos"] or 0) / int(row["repeticiones"] or 1) >= 0.8
+    )
+    promedio_tiempo = (
+        sum(_safe_float(row["tiempo_respuesta"]) for row in actividades_rows) / actividades_total
+        if actividades_total else 0.0
+    )
+    promedio_ayuda = (
+        sum(_safe_float(row["nivel_ayuda_requerido"]) for row in actividades_rows) / actividades_total
+        if actividades_total else 0.0
+    )
+
+    habilidad_acc = {}
+    for row in actividades_rows:
+        habilidad = row["habilidad"]
+        data = habilidad_acc.setdefault(
+            habilidad,
+            {"habilidad": habilidad, "actividades": 0, "aciertos": 0, "intentos": 0, "tiempos": [], "ayudas": []},
+        )
+        data["actividades"] += 1
+        data["aciertos"] += int(row["aciertos"] or 0)
+        data["intentos"] += int(row["repeticiones"] or 0)
+        data["tiempos"].append(_safe_float(row["tiempo_respuesta"]))
+        data["ayudas"].append(_safe_float(row["nivel_ayuda_requerido"]))
+
+    progreso_por_habilidad = []
+    for data in habilidad_acc.values():
+        intentos = data["intentos"]
+        progreso_por_habilidad.append({
+            "habilidad": data["habilidad"],
+            "actividades": data["actividades"],
+            "tasa_aciertos": round(data["aciertos"] / intentos, 4) if intentos else 0.0,
+            "promedio_tiempo_segundos": sum(data["tiempos"]) / len(data["tiempos"]) if data["tiempos"] else 0.0,
+            "promedio_ayuda": sum(data["ayudas"]) / len(data["ayudas"]) if data["ayudas"] else 0.0,
+        })
+    progreso_por_habilidad.sort(key=lambda item: item["habilidad"])
+
+    observaciones = [
+        {
+            "fecha": (row["timestamp"] or row["fecha_inicio"]).isoformat(),
+            "sesion_id": str(row["sesion_id"]),
+            "actividad": row["actividad_nombre"],
+            "habilidad": row["habilidad"],
+            "observacion": row["observaciones"],
+        }
+        for row in actividades_rows
+        if str(row["observaciones"] or "").strip()
+    ]
+
+    actividades_detalle = [
+        {
+            "fecha": row["fecha_inicio"].isoformat() if row["fecha_inicio"] else None,
+            "sesion_id": str(row["sesion_id"]),
+            "actividad_id": str(row["actividad_id"]),
+            "actividad": row["actividad_nombre"],
+            "habilidad": row["habilidad"],
+            "aciertos": int(row["aciertos"] or 0),
+            "intentos": int(row["repeticiones"] or 0),
+            "tasa_aciertos": (
+                round(int(row["aciertos"] or 0) / int(row["repeticiones"] or 1), 4)
+                if int(row["repeticiones"] or 0) > 0 else 0.0
+            ),
+            "tiempo_segundos": _safe_float(row["tiempo_respuesta"]),
+            "nivel_ayuda_requerido": int(row["nivel_ayuda_requerido"] or 0),
+            "nivel_dificultad_usado": row["nivel_dificultad_usado"],
+        }
+        for row in actividades_rows
+    ]
+
+    reporte = {
+        "formato": formato,
+        "generado_at": datetime.utcnow().isoformat(),
+        "nino": {
+            "id": str(nino["id"]),
+            "nombre": nino["nombre"],
+            "edad": _calc_edad(nino["fecha_nacimiento"]),
+            "nivel_cognitivo": nino["nivel_cognitivo"],
+            "diagnostico": nino["diagnostico"],
+            "nivel_tea_validado": nino["nivel_tea_validado"],
+        },
+        "periodo": {
+            "inicio": periodo_inicio.isoformat(),
+            "fin": periodo_fin.isoformat(),
+        },
+        "resumen": {
+            "sesiones_completadas": len(sesiones),
+            "actividades_registradas": actividades_total,
+            "tasa_aciertos_global": round(total_aciertos / total_intentos, 4) if total_intentos else 0.0,
+            "cumplimiento_global": round(cumplidas / actividades_total, 4) if actividades_total else 0.0,
+            "promedio_tiempo_segundos": promedio_tiempo,
+            "promedio_ayuda": promedio_ayuda,
+        },
+        "tendencias": _build_tendencia(sesiones),
+        "progreso_por_habilidad": progreso_por_habilidad,
+        "sesiones": sesiones,
+        "actividades": actividades_detalle,
+        "observaciones": observaciones,
+    }
+
+    with _conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            _registrar_auditoria(
+                cur,
+                usuario_id=current_user["id"],
+                rol_usuario=current_user["role"],
+                accion="REPORTE_TERAPEUTICO_GENERADO",
+                entidad_afectada="reportes_terapeuticos",
+                entidad_id=f"{nino_id}:{formato}:{periodo_inicio.isoformat()}:{periodo_fin.isoformat()}",
+                nino_id=nino_id,
+                payload_nuevo={
+                    "formato": formato,
+                    "periodo_inicio": periodo_inicio.isoformat(),
+                    "periodo_fin": periodo_fin.isoformat(),
+                    "sesiones_incluidas": len(sesiones),
+                    "actividades_incluidas": actividades_total,
+                },
+            )
+
+    if formato == "pdf":
+        filename = f"reporte-terapeutico-{nino_id}.pdf"
+        return Response(
+            content=_build_reporte_pdf(reporte),
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"attachment; filename={filename}"},
+        )
+    return reporte
+
+
+@router.get("/api/dashboard/terapeuta/ninos/{nino_id}/auditoria")
+def listar_auditoria_nino(
+    nino_id: str,
+    limite: int = 100,
+    current_user: dict = Depends(get_current_user),
+):
+    if current_user["role"] not in ("terapeuta", "admin"):
+        raise HTTPException(status_code=403, detail="Solo terapeutas o administradores pueden consultar auditoria")
+
+    limite = max(1, min(int(limite or 100), 500))
+    with _conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            if current_user["role"] == "terapeuta":
+                cur.execute(
+                    """
+                    SELECT 1
+                    FROM ninos n
+                    JOIN terapeutas t ON t.id = n.terapeuta_id
+                    WHERE n.id = %s
+                      AND t.usuario_id = %s
+                      AND n.activo = TRUE
+                    """,
+                    (nino_id, current_user["id"]),
+                )
+                if not cur.fetchone():
+                    raise HTTPException(status_code=404, detail="Nino no encontrado para este terapeuta")
+
+            cur.execute(
+                """
+                SELECT
+                    la.id,
+                    la.fecha_evento,
+                    la.timestamp_servidor,
+                    la.usuario_id,
+                    u.nombre AS actor_nombre,
+                    u.email AS actor_email,
+                    la.rol_usuario,
+                    la.accion,
+                    la.entidad_afectada,
+                    la.entidad_id,
+                    la.nino_id,
+                    la.payload_anterior,
+                    la.payload_nuevo
+                FROM logs_auditoria la
+                LEFT JOIN usuarios u ON u.id = la.usuario_id
+                WHERE la.nino_id = %s
+                ORDER BY COALESCE(la.fecha_evento, la.timestamp_servidor) DESC
+                LIMIT %s
+                """,
+                (nino_id, limite),
+            )
+            rows = cur.fetchall()
+
+    return {
+        "nino_id": nino_id,
+        "eventos": [
+            {
+                "id": str(row["id"]),
+                "fecha": (row["fecha_evento"] or row["timestamp_servidor"]).isoformat(),
+                "actor": {
+                    "usuario_id": str(row["usuario_id"]) if row["usuario_id"] else None,
+                    "nombre": row["actor_nombre"],
+                    "email": row["actor_email"],
+                    "rol": row["rol_usuario"],
+                },
+                "accion": row["accion"],
+                "entidad_afectada": row["entidad_afectada"],
+                "entidad_id": row["entidad_id"],
+                "nino_id": str(row["nino_id"]) if row["nino_id"] else None,
+                "payload_anterior": row["payload_anterior"] or {},
+                "payload_nuevo": row["payload_nuevo"] or {},
+            }
+            for row in rows
+        ],
     }
 
 
 # ── GET /api/ia/asistente/{nino_id} ─────────────────────────────────────────────
 # Datos para el Asistente IA (usado por IAAssistantScreen)
+
+@router.get("/api/dashboard/cumplimiento/proteccion-datos")
+def obtener_cumplimiento_proteccion_datos(
+    nino_id: Optional[str] = None,
+    current_user: dict = Depends(get_current_user),
+):
+    if current_user["role"] not in ("terapeuta", "admin", "padre_tutor", "tutor"):
+        raise HTTPException(status_code=403, detail="Acceso denegado al modulo de cumplimiento")
+    if nino_id:
+        _autorizar_acceso_nino(nino_id, current_user)
+
+    with _conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT control, descripcion, estado, referencia, updated_at
+                FROM evidencias_cumplimiento
+                ORDER BY control
+                """
+            )
+            controles = cur.fetchall()
+
+            consentimiento = None
+            if nino_id:
+                cur.execute(
+                    """
+                    SELECT id, version, finalidad, datos_sensibles, aceptado, accepted_at, revoked_at
+                    FROM consentimientos_informados
+                    WHERE nino_id = %s
+                    ORDER BY accepted_at DESC
+                    LIMIT 1
+                    """,
+                    (nino_id,),
+                )
+                row = cur.fetchone()
+                if row:
+                    consentimiento = {
+                        "id": str(row["id"]),
+                        "version": row["version"],
+                        "finalidad": row["finalidad"],
+                        "datos_sensibles": row["datos_sensibles"],
+                        "aceptado": row["aceptado"] and row["revoked_at"] is None,
+                        "accepted_at": row["accepted_at"].isoformat() if row["accepted_at"] else None,
+                        "revoked_at": row["revoked_at"].isoformat() if row["revoked_at"] else None,
+                    }
+
+    return {
+        "marco_normativo": {
+            "pais": "Peru",
+            "ley": "Ley N. 29733 - Ley de Proteccion de Datos Personales",
+            "alcance": "Tratamiento de datos personales y datos sensibles del nino en RimAI.",
+        },
+        "rol_usuario": current_user["role"],
+        "nino_id": nino_id,
+        "consentimiento": consentimiento,
+        "controles": [
+            {
+                "control": row["control"],
+                "descripcion": row["descripcion"],
+                "estado": row["estado"],
+                "referencia": row["referencia"],
+                "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+            }
+            for row in controles
+        ],
+        "minima_recoleccion": {
+            "datos_obligatorios_registro_familiar": ["nombre", "fecha_nacimiento", "nivel_cognitivo"],
+            "datos_sensibles_opcionales": ["diagnostico", "documentos_clinicos", "medicacion_actual", "perfil_sensorial"],
+            "confirmacion_requerida_para_sensibles": True,
+        },
+        "advertencia_clinica": (
+            "RimAI opera como herramienta de apoyo clinico y seguimiento terapeutico; "
+            "no sustituye evaluacion profesional ni emite diagnostico clinico."
+        ),
+        "control_acceso": {
+            "terapeuta": "Solo accede a ninos vinculados a su perfil profesional.",
+            "familia": "Solo accede a ninos asociados a su cuenta de tutor.",
+            "admin": "Acceso administrativo trazable.",
+        },
+    }
+
 
 @router.get("/api/ia/asistente/{nino_id}")
 def obtener_asistente_ia(

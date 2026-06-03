@@ -27,7 +27,8 @@ import 'package:rimai_app/adapters/input/screens/familia/family_activity_session
 import 'package:rimai_app/adapters/input/screens/familia/family_plan_screen.dart';
 import 'package:rimai_app/adapters/input/screens/familia/ejecucion_actividad_screen.dart';
 import 'package:rimai_app/adapters/input/screens/familia/family_chatbot_screen.dart';
-import 'package:rimai_app/domain/entities/reporte.dart';
+import 'package:rimai_app/adapters/input/screens/documents/clinical_document_viewer_screen.dart';
+import 'package:rimai_app/core/utils/clinical_document_utils.dart';
 import 'package:rimai_app/application/usecases/registrar_actividad_usecase.dart';
 import 'package:rimai_app/application/usecases/sync_offline_usecase.dart';
 import 'package:rimai_app/adapters/output/sqlite_db_repository.dart';
@@ -98,25 +99,17 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: '/auth/login',
             name: 'login',
-            pageBuilder: (context, state) => CustomTransitionPage(
+            pageBuilder: (context, state) => NoTransitionPage(
               key: state.pageKey,
               child: const LoginScreen(),
-              transitionDuration: const Duration(milliseconds: 400),
-              transitionsBuilder:
-                  (context, animation, secondaryAnimation, child) =>
-                      FadeTransition(opacity: animation, child: child),
             ),
           ),
           GoRoute(
             path: '/auth/register',
             name: 'register',
-            pageBuilder: (context, state) => CustomTransitionPage(
+            pageBuilder: (context, state) => NoTransitionPage(
               key: state.pageKey,
               child: const RegisterScreen(),
-              transitionDuration: const Duration(milliseconds: 400),
-              transitionsBuilder:
-                  (context, animation, secondaryAnimation, child) =>
-                      FadeTransition(opacity: animation, child: child),
             ),
           ),
         ],
@@ -272,13 +265,20 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         },
       ),
       GoRoute(
-        path: '/terapeuta/reportes',
+        path: '/terapeuta/documento',
         builder: (context, state) {
-          final reporte = state.extra as ReporteAnalitico?;
-          if (reporte == null) {
-            return const _PlaceholderScreen(title: 'No hay reporte');
+          final extra = state.extra;
+          if (extra is! ClinicalDocumentInfo) {
+            return const _PlaceholderScreen(title: 'Documento no disponible');
           }
-          return ReporteAnaliticoScreen(reporte: reporte);
+          return ClinicalDocumentViewerScreen(document: extra);
+        },
+      ),
+      GoRoute(
+        path: '/terapeuta/reportes/:ninoId',
+        builder: (context, state) {
+          final ninoId = state.pathParameters['ninoId'] ?? '';
+          return ReporteAnaliticoScreen(ninoId: ninoId);
         },
       ),
 
@@ -326,6 +326,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             nivelDificultadRecomendado: extra['nivelRecomendado'] as String?,
             ajustesDificultad: ajustes,
             permitirAplicarSugerencia: false,
+            pendienteSync: extra['pendienteSync'] == true,
           );
         },
       ),

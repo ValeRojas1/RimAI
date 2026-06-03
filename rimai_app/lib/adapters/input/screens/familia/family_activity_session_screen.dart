@@ -202,6 +202,8 @@ class _FamilyActivitySessionScreenState
                   ),
                   const SizedBox(height: 16),
                 ],
+                _buildActivityGuide(actividad),
+                const SizedBox(height: 16),
                 BentoCard(
                   backgroundColor: Colors.white,
                   child: Column(
@@ -331,6 +333,136 @@ class _FamilyActivitySessionScreenState
     ];
   }
 
+  Widget _buildActivityGuide(ActividadPlan actividad) {
+    final materiales = actividad.materiales;
+    final recomendaciones = actividad.recomendacionesAdaptadas.isEmpty
+        ? [
+            actividad.requiereAcompanamiento
+                ? 'Acompana al nino y ofrece ayuda gradual si la necesita.'
+                : 'Supervisa de cerca y permite que el nino intente con autonomia.',
+            'Mantente dentro del tiempo estimado y registra observaciones al finalizar.',
+          ]
+        : actividad.recomendacionesAdaptadas;
+
+    return BentoCard(
+      backgroundColor: Colors.white,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'GUIA DE ACTIVIDAD',
+            style: TextStyle(
+              color: _kSubtext,
+              fontSize: 11,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 1,
+            ),
+          ),
+          const SizedBox(height: 14),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final metrics = [
+                _GuideMetric(
+                  icon: Icons.timer_outlined,
+                  label: 'Duracion',
+                  value: _durationLabel(actividad.duracionEstimada),
+                ),
+                _GuideMetric(
+                  icon: Icons.tune,
+                  label: 'Dificultad',
+                  value: actividad.nivelDificultad,
+                ),
+                _GuideMetric(
+                  icon: actividad.requiereAcompanamiento
+                      ? Icons.supervisor_account_outlined
+                      : Icons.person_outline,
+                  label: 'Modo',
+                  value: actividad.requiereAcompanamiento
+                      ? 'Acompanada'
+                      : 'Autonoma',
+                ),
+              ];
+              if (constraints.maxWidth < 560) {
+                return Column(
+                  children: metrics
+                      .map((metric) => Padding(
+                            padding: const EdgeInsets.only(bottom: 10),
+                            child: metric,
+                          ))
+                      .toList(),
+                );
+              }
+              return Row(
+                children: [
+                  Expanded(child: metrics[0]),
+                  const SizedBox(width: 10),
+                  Expanded(child: metrics[1]),
+                  const SizedBox(width: 10),
+                  Expanded(child: metrics[2]),
+                ],
+              );
+            },
+          ),
+          const SizedBox(height: 18),
+          const Text(
+            'Materiales necesarios',
+            style: TextStyle(color: _kText, fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 8),
+          if (materiales.isEmpty)
+            const Text(
+              'No se registraron materiales especificos. Prepara un espacio tranquilo antes de iniciar.',
+              style: TextStyle(color: _kSubtext, height: 1.35),
+            )
+          else
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: materiales
+                  .map((item) => Chip(
+                        label: Text(item),
+                        backgroundColor: _kSurface,
+                        side: BorderSide.none,
+                      ))
+                  .toList(),
+            ),
+          const SizedBox(height: 18),
+          const Text(
+            'Recomendaciones para este nino',
+            style: TextStyle(color: _kText, fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 8),
+          ...recomendaciones.take(5).map(
+                (item) => Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Icon(Icons.check_circle_outline,
+                          color: _kPrimary, size: 18),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          item,
+                          style:
+                              const TextStyle(color: _kSubtext, height: 1.35),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+        ],
+      ),
+    );
+  }
+
+  String _durationLabel(int? seconds) {
+    if (seconds == null || seconds <= 0) return 'Sin limite';
+    final minutes = (seconds / 60).round();
+    return '$minutes min';
+  }
+
   Future<void> _finish(PlanData plan, ActividadPlan actividad) async {
     if (_intentos <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -366,6 +498,16 @@ class _FamilyActivitySessionScreenState
               );
       _timer?.cancel();
       if (!mounted) return;
+      final pendienteSync = result['pendiente_sync'] == true;
+      if (pendienteSync) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Actividad guardada sin conexion. Se sincronizara automaticamente.',
+            ),
+          ),
+        );
+      }
       context.go('/familia/sesion/resumen', extra: {
         'aciertos': _aciertos,
         'intentos': _intentos,
@@ -379,6 +521,7 @@ class _FamilyActivitySessionScreenState
         'sesionNumero': plan.sesionNumero,
         'nivelRecomendado': result['nivel_dificultad_recomendado']?.toString(),
         'ajustesDificultad': result['ajustes_dificultad'],
+        'pendienteSync': pendienteSync,
       });
     } catch (e) {
       if (!mounted) return;
@@ -482,6 +625,61 @@ class _TimerPill extends StatelessWidget {
       child: Text(
         time,
         style: const TextStyle(color: _kText, fontWeight: FontWeight.bold),
+      ),
+    );
+  }
+}
+
+class _GuideMetric extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+
+  const _GuideMetric({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: _kSurface,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFE9E1D8)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: _kPrimary),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label.toUpperCase(),
+                  style: const TextStyle(
+                    color: _kSubtext,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: _kText,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }

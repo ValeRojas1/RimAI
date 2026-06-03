@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, DateTime
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, DateTime, Float
 from sqlalchemy.orm import declarative_base
 from datetime import datetime
 
@@ -104,4 +104,3 @@ class LogTrazabilidadModel(Base):
     payload_anterior = Column(String)
     payload_nuevo = Column(String, nullable=False)
     timestamp_servidor = Column(DateTime, default=datetime.utcnow)
-

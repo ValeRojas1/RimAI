@@ -33,23 +33,27 @@ class ApiSyncRepository implements ISyncPort {
   }
 
   @override
-  Future<bool> syncActividades(List<ActividadLocal> actividades) async {
-    try {
-      final headers = await _jsonAuthHeaders();
-      if (headers == null) return false;
+  Future<List<String>> syncActividades(List<ActividadLocal> actividades) async {
+    final headers = await _jsonAuthHeaders();
+    if (headers == null) return [];
 
-      final response = await http.post(
-        Uri.parse('$baseUrl/api/v1/seguimiento/sincronizar'),
-        headers: headers,
-        body: jsonEncode({
-          'actividades': actividades.map((a) => a.toJson()).toList(),
-        }),
-      );
+    final syncedIds = <String>[];
+    for (final actividad in actividades) {
+      try {
+        final response = await http.post(
+          Uri.parse('$baseUrl/api/sesiones'),
+          headers: headers,
+          body: jsonEncode(actividad.toSesionPayload()),
+        );
 
-      return response.statusCode == 200;
-    } catch (e) {
-      return false; // Error de red, mantiene offline
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          syncedIds.add(actividad.id);
+        }
+      } catch (_) {
+        // Se mantiene en cola local para un reintento posterior.
+      }
     }
+    return syncedIds;
   }
 
   @override

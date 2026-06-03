@@ -1,55 +1,83 @@
 class ActividadLocal {
-  final String? id; // UUID
-  final int patientId;
+  final String id;
+  final String ninoId;
+  final String planId;
   final String actividadId;
-  final int planId;
-  final int tiempoEmpleadoSegundos;
-  final int nivelApoyoRequerido;
-  final String observaciones;
-  final List<String> detonantesPresentados;
-  final bool completada;
+  final int aciertos;
+  final int repeticiones;
+  final int tiempoRespuestaSegundos;
+  final int nivelAyudaRequerido;
+  final String nivelDificultadUsado;
+  final String? observaciones;
   final DateTime timestampLocal;
 
   ActividadLocal({
-    this.id,
-    required this.patientId,
-    required this.actividadId,
+    required this.id,
+    required this.ninoId,
     required this.planId,
-    required this.tiempoEmpleadoSegundos,
-    required this.nivelApoyoRequerido,
-    required this.observaciones,
-    required this.detonantesPresentados,
-    required this.completada,
+    required this.actividadId,
+    required this.aciertos,
+    required this.repeticiones,
+    required this.tiempoRespuestaSegundos,
+    required this.nivelAyudaRequerido,
+    required this.nivelDificultadUsado,
+    this.observaciones,
     required this.timestampLocal,
   });
 
   Map<String, dynamic> toJson() {
     return {
       'id': id,
-      'patient_id': patientId,
-      'actividad_id': actividadId,
+      'nino_id': ninoId,
       'plan_id': planId,
-      'tiempo_empleado_segundos': tiempoEmpleadoSegundos,
-      'nivel_apoyo_requerido': nivelApoyoRequerido,
+      'actividad_id': actividadId,
+      'aciertos': aciertos,
+      'repeticiones': repeticiones,
+      'tiempo_respuesta_segundos': tiempoRespuestaSegundos,
+      'nivel_ayuda_requerido': nivelAyudaRequerido,
+      'nivel_dificultad_usado': nivelDificultadUsado,
       'observaciones': observaciones,
-      'detonantes_presentados': detonantesPresentados,
-      'completada': completada,
       'timestamp_local': timestampLocal.toIso8601String(),
+    };
+  }
+
+  Map<String, dynamic> toSesionPayload() {
+    return {
+      'client_event_id': id,
+      'nino_id': ninoId,
+      'plan_id': planId,
+      'resultados': [
+        {
+          'actividad_id': actividadId,
+          'aciertos': aciertos,
+          'repeticiones': repeticiones,
+          'tiempo_respuesta': tiempoRespuestaSegundos.toDouble(),
+          'nivel_ayuda_requerido': nivelAyudaRequerido,
+          'nivel_dificultad_usado': nivelDificultadUsado,
+          if (observaciones != null && observaciones!.trim().isNotEmpty)
+            'observaciones': observaciones!.trim(),
+        }
+      ],
     };
   }
 
   factory ActividadLocal.fromJson(Map<String, dynamic> json) {
     return ActividadLocal(
-      id: json['id'],
-      patientId: json['patient_id'],
-      actividadId: json['actividad_id'],
-      planId: json['plan_id'],
-      tiempoEmpleadoSegundos: json['tiempo_empleado_segundos'],
-      nivelApoyoRequerido: json['nivel_apoyo_requerido'],
-      observaciones: json['observaciones'],
-      detonantesPresentados: List<String>.from(json['detonantes_presentados'] ?? []),
-      completada: json['completada'],
-      timestampLocal: DateTime.parse(json['timestamp_local']),
+      id: json['id']?.toString() ?? '',
+      ninoId: json['nino_id']?.toString() ?? '',
+      planId: json['plan_id']?.toString() ?? '',
+      actividadId: json['actividad_id']?.toString() ?? '',
+      aciertos: (json['aciertos'] as num?)?.toInt() ?? 0,
+      repeticiones: (json['repeticiones'] as num?)?.toInt() ?? 0,
+      tiempoRespuestaSegundos:
+          (json['tiempo_respuesta_segundos'] as num?)?.toInt() ?? 0,
+      nivelAyudaRequerido:
+          (json['nivel_ayuda_requerido'] as num?)?.toInt() ?? 0,
+      nivelDificultadUsado:
+          json['nivel_dificultad_usado']?.toString() ?? 'Medio',
+      observaciones: json['observaciones']?.toString(),
+      timestampLocal: DateTime.tryParse(json['timestamp_local']?.toString() ?? '') ??
+          DateTime.now(),
     );
   }
 }

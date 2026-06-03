@@ -24,7 +24,15 @@ $MIGRATIONS = @(
     "01_init.sql",
     "02_seed.sql",
     "03_migration_estados.sql",
-    "04_migration_compat.sql"
+    "04_migration_compat.sql",
+    "06_stored_procedures.sql",
+    "07_migration_plan_activity_difficulty.sql",
+    "08_migration_business_rules.sql",
+    "09_migration_notifications.sql",
+    "10_migration_clinical_alerts.sql",
+    "11_migration_offline_sync.sql",
+    "12_migration_audit_trail.sql",
+    "13_migration_data_protection_compliance.sql"
 )
 
 if ($WithTestSeed) {

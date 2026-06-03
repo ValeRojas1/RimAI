@@ -24,6 +24,9 @@ class DashboardScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final dashboardAsync = ref.watch(dashboardProvider);
+    final notifAsync = ref.watch(terapeutaNotificacionesProvider);
+    final unreadCount =
+        notifAsync.valueOrNull?.where((n) => !n.leido).length ?? 0;
 
     return Scaffold(
       backgroundColor: _kBg,
@@ -36,9 +39,15 @@ class DashboardScreen extends ConsumerWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             IconButton(
-              icon: const Icon(Icons.notifications_outlined, color: _kSubtext),
+              icon: Badge(
+                isLabelVisible: unreadCount > 0,
+                label: Text('$unreadCount'),
+                backgroundColor: _kPrimary,
+                child:
+                    const Icon(Icons.notifications_outlined, color: _kSubtext),
+              ),
               tooltip: 'Notificaciones',
-              onPressed: () {},
+              onPressed: () => _showNotifications(context, ref),
             ),
             IconButton(
               icon: const Icon(Icons.logout, color: _kPrimary),
@@ -81,6 +90,7 @@ class DashboardScreen extends ConsumerWidget {
         onRefresh: () async {
           ref.invalidate(dashboardProvider);
           ref.invalidate(pendientesProvider);
+          ref.invalidate(terapeutaNotificacionesProvider);
         },
         child: SingleChildScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
@@ -111,6 +121,198 @@ class DashboardScreen extends ConsumerWidget {
   }
 
   // ── Content ────────────────────────────────────────────────────────────────
+
+  void _showNotifications(BuildContext context, WidgetRef ref) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return Consumer(
+          builder: (context, ref, child) {
+            final async = ref.watch(terapeutaNotificacionesProvider);
+            return Container(
+              height: MediaQuery.of(context).size.height * 0.72,
+              decoration: const BoxDecoration(
+                color: _kBg,
+                borderRadius: BorderRadius.only(
+                  topLeft: Radius.circular(24),
+                  topRight: Radius.circular(24),
+                ),
+              ),
+              child: Column(
+                children: [
+                  const SizedBox(height: 12),
+                  Container(
+                    width: 48,
+                    height: 5,
+                    decoration: BoxDecoration(
+                      color: _kBorder,
+                      borderRadius: BorderRadius.circular(100),
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 24),
+                    child: Row(
+                      children: [
+                        Text(
+                          'Notificaciones clinicas',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w800,
+                            color: _kText,
+                          ),
+                        ),
+                        Spacer(),
+                        Icon(Icons.notifications_active_outlined,
+                            color: _kPrimary),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  const Divider(height: 1, color: _kBorder),
+                  Expanded(
+                    child: async.when(
+                      loading: () => const Center(
+                        child: CircularProgressIndicator(color: _kPrimary),
+                      ),
+                      error: (err, _) => Center(
+                        child: Text(
+                          'Error al cargar notificaciones: $err',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(color: _kSubtext),
+                        ),
+                      ),
+                      data: (items) {
+                        if (items.isEmpty) {
+                          return const Center(
+                            child: Text(
+                              'No hay notificaciones pendientes',
+                              style: TextStyle(
+                                color: _kSubtext,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          );
+                        }
+                        return ListView.builder(
+                          padding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
+                          itemCount: items.length,
+                          itemBuilder: (context, index) {
+                            final n = items[index];
+                            final date = DateTime.tryParse(n.createdAt);
+                            final isAlert = n.tipo == 'alerta_clinica';
+                            return Opacity(
+                              opacity: n.leido ? 0.65 : 1,
+                              child: BentoCard(
+                                padding: const EdgeInsets.all(16),
+                                backgroundColor: Colors.white,
+                                border: Border.all(
+                                  color: isAlert
+                                      ? _kPrimary.withValues(alpha: 0.25)
+                                      : _kBorder,
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Icon(
+                                          isAlert
+                                              ? Icons.warning_amber_outlined
+                                              : Icons.notifications_outlined,
+                                          color:
+                                              isAlert ? _kPrimary : _kSubtext,
+                                          size: 20,
+                                        ),
+                                        const SizedBox(width: 10),
+                                        Expanded(
+                                          child: Text(
+                                            n.titulo,
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              color: _kText,
+                                              fontSize: 15,
+                                            ),
+                                          ),
+                                        ),
+                                        if (!n.leido)
+                                          IconButton(
+                                            tooltip: 'Marcar como leida',
+                                            icon: const Icon(Icons.done,
+                                                size: 18, color: _kPrimary),
+                                            onPressed: () async {
+                                              await ref
+                                                  .read(
+                                                      dashboardServiceProvider)
+                                                  .marcarNotificacionTerapeutaLeida(
+                                                      n.id);
+                                              ref.invalidate(
+                                                  terapeutaNotificacionesProvider);
+                                              ref.invalidate(dashboardProvider);
+                                            },
+                                          ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      n.mensaje,
+                                      style: const TextStyle(
+                                        color: _kSubtext,
+                                        fontSize: 13,
+                                        height: 1.35,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 10),
+                                    Row(
+                                      children: [
+                                        _tagSmall(n.canal),
+                                        const SizedBox(width: 6),
+                                        _tagSmall(n.estadoEnvio),
+                                        const Spacer(),
+                                        if (date != null)
+                                          Text(
+                                            DateFormat('dd MMM, HH:mm')
+                                                .format(date),
+                                            style: const TextStyle(
+                                              color: _kSubtext,
+                                              fontSize: 11,
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _tagSmall(String label) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          color: _kBorder.withValues(alpha: 0.45),
+          borderRadius: BorderRadius.circular(100),
+        ),
+        child: Text(
+          label,
+          style: const TextStyle(fontSize: 11, color: _kSubtext),
+        ),
+      );
 
   Widget _buildContent(
       BuildContext context, WidgetRef ref, DashboardData data) {
@@ -627,6 +829,7 @@ class _PacienteCard extends ConsumerWidget {
                 ? const Color(0xFFD97706)
                 : const Color(0xFFBA1A1A);
     final tasaLabel = tasa != null ? '${(tasa * 100).toInt()}%' : '--';
+    final riskColor = _riskColor(paciente.riesgoAbandono.nivel);
 
     return BentoCard(
       padding: const EdgeInsets.all(24),
@@ -661,11 +864,13 @@ class _PacienteCard extends ConsumerWidget {
                   ),
                 ),
                 const SizedBox(height: 4),
-                Row(
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
                   children: [
                     _tag('${paciente.edad} años'),
-                    const SizedBox(width: 8),
                     _tag(paciente.nivelCognitivo),
+                    _riskTag(paciente.riesgoAbandono.nivel, riskColor),
                   ],
                 ),
                 if (paciente.ultimaSesion?.fecha != null) ...[
@@ -675,6 +880,13 @@ class _PacienteCard extends ConsumerWidget {
                     style: const TextStyle(fontSize: 12, color: _kSubtext),
                   ),
                 ],
+                const SizedBox(height: 6),
+                Text(
+                  '${paciente.riesgoAbandono.notaClinica} Factores: ${paciente.riesgoAbandono.factores.length}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 11, color: _kSubtext),
+                ),
               ],
             ),
           ),
@@ -692,6 +904,15 @@ class _PacienteCard extends ConsumerWidget {
               ),
               const Text('precisión',
                   style: TextStyle(fontSize: 11, color: _kSubtext)),
+              const SizedBox(height: 6),
+              Text(
+                '${paciente.riesgoAbandono.diasSinActividad} d sin act.',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: riskColor,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
               const SizedBox(height: 12),
               GestureDetector(
                 onTap: () => context.go('/terapeuta/nino/${paciente.id}'),
@@ -729,6 +950,36 @@ class _PacienteCard extends ConsumerWidget {
       child: Text(
         label,
         style: const TextStyle(fontSize: 11, color: _kSubtext),
+      ),
+    );
+  }
+
+  Color _riskColor(String nivel) {
+    return switch (nivel.toLowerCase()) {
+      'alto' => const Color(0xFFBA1A1A),
+      'moderado' => const Color(0xFFD97706),
+      _ => const Color(0xFF22C55E),
+    };
+  }
+
+  Widget _riskTag(String nivel, Color color) {
+    final label = nivel.isEmpty
+        ? 'Bajo'
+        : '${nivel.substring(0, 1).toUpperCase()}${nivel.substring(1).toLowerCase()}';
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(100),
+        border: Border.all(color: color.withValues(alpha: 0.25)),
+      ),
+      child: Text(
+        'Riesgo $label',
+        style: TextStyle(
+          fontSize: 11,
+          color: color,
+          fontWeight: FontWeight.bold,
+        ),
       ),
     );
   }
