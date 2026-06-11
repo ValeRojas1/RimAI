@@ -142,15 +142,20 @@ class _ActiveSessionScreenState extends ConsumerState<ActiveSessionScreen> {
         currentIndex: 1,
         onTap: (index) {
           if (index == 0) context.go('/terapeuta/dashboard');
-          if (index == 2 && ninoId != null) context.go('/terapeuta/ia/$ninoId');
-          if (index == 3 && ninoId != null) {
-            context.go('/terapeuta/progreso/$ninoId');
+          if (index == 2) {
+            context
+                .go(ninoId != null ? '/terapeuta/ia/$ninoId' : '/terapeuta/ia');
+          }
+          if (index == 3) {
+            context.go(ninoId != null
+                ? '/terapeuta/progreso/$ninoId'
+                : '/terapeuta/progreso');
           }
         },
         items: [
           BottomNavItem(icon: Icons.home, label: 'Inicio'),
           BottomNavItem(icon: Icons.spatial_audio_off, label: 'Sesion'),
-          BottomNavItem(icon: Icons.auto_awesome, label: 'IA'),
+          BottomNavItem(icon: Icons.auto_awesome, label: 'Apoyo'),
           BottomNavItem(icon: Icons.insights, label: 'Progreso'),
         ],
       ),

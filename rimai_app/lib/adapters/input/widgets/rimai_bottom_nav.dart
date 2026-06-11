@@ -47,47 +47,69 @@ class RimAIBottomNav extends StatelessWidget {
             ),
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: items.asMap().entries.map((entry) {
                 final int idx = entry.key;
                 final BottomNavItem item = entry.value;
                 final bool isActive = idx == currentIndex;
 
-                return GestureDetector(
-                  onTap: () => onTap(idx),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    curve: Curves.easeInOut,
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 20, vertical: 12),
-                    decoration: BoxDecoration(
-                      color: isActive
-                          ? const Color(0xFFB8D6B2)
-                          : Colors.transparent,
-                      borderRadius: BorderRadius.circular(100),
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          item.icon,
-                          color: isActive
-                              ? const Color(0xFF1E1B16)
-                              : const Color(0xFF58423B).withValues(alpha: 0.5),
+                return Expanded(
+                  child: Semantics(
+                    label: item.label,
+                    selected: isActive,
+                    button: true,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: () => onTap(idx),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        curve: Curves.easeInOut,
+                        margin: const EdgeInsets.symmetric(horizontal: 2),
+                        padding: EdgeInsets.symmetric(
+                          horizontal: isActive ? 12 : 4,
+                          vertical: 10,
                         ),
-                        if (isActive)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 4.0),
-                            child: Text(
-                              item.label,
-                              style: const TextStyle(
-                                color: Color(0xFF1E1B16),
-                                fontWeight: FontWeight.bold,
-                                fontSize: 12,
-                              ),
+                        decoration: BoxDecoration(
+                          color: isActive
+                              ? const Color(0xFFB8D6B2)
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(100),
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              item.icon,
+                              color: isActive
+                                  ? const Color(0xFF1E1B16)
+                                  : const Color(0xFF58423B)
+                                      .withValues(alpha: 0.72),
                             ),
-                          )
-                      ],
+                            AnimatedSize(
+                              duration: const Duration(milliseconds: 180),
+                              curve: Curves.easeInOut,
+                              alignment: Alignment.topCenter,
+                              child: isActive
+                                  ? const SizedBox.shrink()
+                                  : Padding(
+                                      padding: const EdgeInsets.only(top: 4.0),
+                                      child: FittedBox(
+                                        fit: BoxFit.scaleDown,
+                                        child: Text(
+                                          item.label,
+                                          maxLines: 1,
+                                          softWrap: false,
+                                          style: const TextStyle(
+                                            color: Color(0xFF58423B),
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 11,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
                   ),
                 );

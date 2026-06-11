@@ -1,8 +1,6 @@
 from fastapi import Depends, HTTPException
 from fastapi.security import OAuth2PasswordBearer
 from jose import jwt, JWTError
-import os
-from typing import Optional
 
 # Implementaciones a inyectar (que crearemos en outbound)
 from app.adapters.outbound.database.postgres_user_repository import PostgresUserRepository
@@ -25,15 +23,15 @@ from app.adapters.outbound.database.postgres_plan_repository import PostgresPlan
 from app.adapters.outbound.database.postgres_seguimiento_repository import PostgresSeguimientoRepository
 from app.adapters.outbound.database.postgres_auditoria_repository import PostgresAuditoriaRepository
 from app.adapters.outbound.database.postgres_reportes_repository import PostgresReportesRepository
-
-SECRET_KEY = os.getenv("JWT_SECRET", "super-secret-key-rimai-2024")
-ALGORITHM = "HS256"
+from app.infrastructure.config import get_jwt_algorithm, get_jwt_secret
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
 def get_current_user(token: str = Depends(oauth2_scheme)):
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(
+            token, get_jwt_secret(), algorithms=[get_jwt_algorithm()]
+        )
         user_id = payload.get("id")
         role = payload.get("role")
         if user_id is None or role is None:

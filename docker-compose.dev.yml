@@ -1,0 +1,10 @@
+# Perfil dev: datos demo y pgAdmin. Uso: docker compose --profile dev up
+services:
+  db:
+    volumes:
+      - ./backend/sql/02_seed.sql:/docker-entrypoint-initdb.d/02_seed.sql
+      - ./backend/sql/05_seed_test.sql:/docker-entrypoint-initdb.d/05_seed_test.sql
+
+  api:
+    environment:
+      ALLOW_PUBLIC_REGISTER: "true"

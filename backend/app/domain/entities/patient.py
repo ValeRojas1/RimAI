@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Union
 from datetime import datetime
 from enum import Enum
 
@@ -22,7 +22,7 @@ class CalmingRitual(BaseModel):
 
 class ClinicalProfile(BaseModel):
     id: Optional[int] = None
-    patient_id: int
+    patient_id: Union[int, str]
     antecedentes_clinicos: str
     escolaridad: str
     perfil_sensorial_score: int
@@ -34,16 +34,16 @@ class ClinicalProfile(BaseModel):
     created_at: Optional[datetime] = None
 
 class Patient(BaseModel):
-    id: Optional[int] = None
+    id: Optional[Union[int, str]] = None
     nombre: str
     edad: int
     diagnostico_declarado: str
-    tutor_id: int
+    tutor_id: Union[int, str]
     created_at: Optional[datetime] = None
 
 class ExternalEvaluation(BaseModel):
     id: Optional[int] = None
-    patient_id: int
+    patient_id: Union[int, str]
     file_url: str
     uploaded_by: SourceEnum
     created_at: Optional[datetime] = None

@@ -1,25 +1,25 @@
-import os
+import logging
+
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from typing import Optional, List
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from passlib.context import CryptContext
 
 from app.application.usecases.therapist_usecases import TherapistUseCases
+from app.domain.entities.user import RoleEnum
 from .dependencies import get_therapist_use_cases, get_current_user
+from app.infrastructure.database import get_connection
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://rimai_user:rimai_secure_2026@db:5432/rimai_db",
-)
-
 def _conn():
-    return psycopg2.connect(DATABASE_URL)
+    return get_connection()
 
 class TherapistCreateRequest(BaseModel):
     nombre_completo: str
@@ -32,7 +32,7 @@ class UsuarioCreateRequest(BaseModel):
     nombre: str
     email: str
     password: str
-    rol: str
+    rol: RoleEnum
     especialidad: Optional[str] = None
     colegiatura: Optional[str] = None
 
@@ -87,8 +87,9 @@ def obtener_estadisticas(current_user: dict = Depends(get_current_user)):
                     "total_ninos": total_ninos,
                     "total_sesiones": total_sesiones
                 }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error interno del servidor: {str(e)}")
+    except Exception:
+        logger.exception("Error interno al obtener estadísticas admin")
+        raise HTTPException(status_code=500, detail="Error interno del servidor")
 
 @router.get("/usuarios")
 def listar_usuarios(current_user: dict = Depends(get_current_user)):
@@ -118,13 +119,16 @@ def listar_usuarios(current_user: dict = Depends(get_current_user)):
                         "created_at": r["created_at"].isoformat() if r["created_at"] else None
                     })
                 return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error interno al listar usuarios: {str(e)}")
+    except Exception:
+        logger.exception("Error interno al listar usuarios admin")
+        raise HTTPException(status_code=500, detail="Error interno al listar usuarios")
 
 @router.post("/usuarios")
 def crear_usuario(request: UsuarioCreateRequest, current_user: dict = Depends(get_current_user)):
     if current_user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Not enough permissions")
+
+    rol_value = request.rol.value
         
     try:
         hashed_password = pwd_context.hash(request.password)
@@ -142,13 +146,13 @@ def crear_usuario(request: UsuarioCreateRequest, current_user: dict = Depends(ge
                     VALUES (%s, %s, %s, %s, TRUE)
                     RETURNING id, nombre, email, rol, activo, created_at
                     """,
-                    (request.nombre, request.email, hashed_password, request.rol)
+                    (request.nombre, request.email, hashed_password, rol_value)
                 )
                 row = cur.fetchone()
                 usuario_id = row["id"]
                 
                 # Crear perfiles secundarios correspondientes
-                if request.rol == "terapeuta":
+                if request.rol == RoleEnum.TERAPEUTA:
                     cur.execute(
                         """
                         INSERT INTO terapeutas (usuario_id, especialidad, colegiatura)
@@ -157,7 +161,7 @@ def crear_usuario(request: UsuarioCreateRequest, current_user: dict = Depends(ge
                         """,
                         (usuario_id, request.especialidad or "General", request.colegiatura)
                     )
-                elif request.rol in ["padre_tutor", "tutor"]:
+                elif request.rol == RoleEnum.TUTOR:
                     cur.execute(
                         """
                         INSERT INTO padres_tutores (usuario_id)
@@ -179,8 +183,9 @@ def crear_usuario(request: UsuarioCreateRequest, current_user: dict = Depends(ge
                 }
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error interno al crear usuario: {str(e)}")
+    except Exception:
+        logger.exception("Error interno al crear usuario admin")
+        raise HTTPException(status_code=500, detail="Error interno al crear usuario")
 
 @router.patch("/usuarios/{usuario_id}/status")
 def actualizar_estado_usuario(usuario_id: str, request: ActualizarEstadoUsuarioRequest, current_user: dict = Depends(get_current_user)):
@@ -219,8 +224,9 @@ def actualizar_estado_usuario(usuario_id: str, request: ActualizarEstadoUsuarioR
                 }
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error al actualizar estado: {str(e)}")
+    except Exception:
+        logger.exception("Error al actualizar estado de usuario admin")
+        raise HTTPException(status_code=500, detail="Error al actualizar estado")
 
 @router.delete("/usuarios/{usuario_id}")
 def eliminar_usuario(usuario_id: str, current_user: dict = Depends(get_current_user)):
@@ -272,5 +278,6 @@ def eliminar_usuario(usuario_id: str, current_user: dict = Depends(get_current_u
                 return {"status": "ok", "message": "Usuario eliminado exitosamente"}
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error interno al eliminar usuario: {str(e)}")
+    except Exception:
+        logger.exception("Error interno al eliminar usuario admin")
+        raise HTTPException(status_code=500, detail="Error interno al eliminar usuario")

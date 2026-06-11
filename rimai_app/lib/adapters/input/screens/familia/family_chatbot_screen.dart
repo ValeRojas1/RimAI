@@ -31,7 +31,8 @@ class FamilyChatbotScreen extends ConsumerStatefulWidget {
   const FamilyChatbotScreen({super.key});
 
   @override
-  ConsumerState<FamilyChatbotScreen> createState() => _FamilyChatbotScreenState();
+  ConsumerState<FamilyChatbotScreen> createState() =>
+      _FamilyChatbotScreenState();
 }
 
 class _FamilyChatbotScreenState extends ConsumerState<FamilyChatbotScreen> {
@@ -47,7 +48,8 @@ class _FamilyChatbotScreenState extends ConsumerState<FamilyChatbotScreen> {
     // Mensaje de bienvenida inicial
     _messages.add(
       ChatMessage(
-        text: '¡Hola! Soy tu asistente de IA especializado de RimAI. Estoy aquí para ayudarte a comprender mejor el desarrollo de tu hijo, resolver dudas sobre el autismo (TEA), consultar sus rutinas de regulación o ver qué actividades tenemos preparadas para su sesión de hoy. ¿De quién te gustaría conversar hoy?',
+        text:
+            '¡Hola! Soy tu asistente de IA especializado de RimAI. Estoy aquí para ayudarte a comprender mejor el desarrollo de tu hijo, resolver dudas sobre el autismo (TEA), consultar sus rutinas de regulación o ver qué actividades tenemos preparadas para su sesión de hoy. ¿De quién te gustaría conversar hoy?',
         isUser: false,
         timestamp: DateTime.now(),
       ),
@@ -107,7 +109,8 @@ class _FamilyChatbotScreenState extends ConsumerState<FamilyChatbotScreen> {
     });
   }
 
-  String _generateResponse(String text, {PacientePerfil? perfil, PlanData? plan}) {
+  String _generateResponse(String text,
+      {PacientePerfil? perfil, PlanData? plan}) {
     final query = text.toLowerCase().trim();
     final nombre = perfil?.nombre ?? 'tu niño';
 
@@ -123,18 +126,23 @@ class _FamilyChatbotScreenState extends ConsumerState<FamilyChatbotScreen> {
       }
 
       final buffer = StringBuffer();
-      buffer.writeln('Para la sesión de hoy de **$nombre** (Sesión ${plan.sesionNumero}), tenemos programadas las siguientes actividades:');
+      buffer.writeln(
+          'Para la sesión de hoy de **$nombre** (Sesión ${plan.sesionNumero}), tenemos programadas las siguientes actividades:');
       buffer.writeln();
       for (var i = 0; i < plan.actividades.length; i++) {
         final act = plan.actividades[i];
-        final tipo = act.requiereAcompanamiento ? 'Acompañada (requiere tu apoyo)' : 'Autónoma (el niño puede hacerla solo)';
+        final tipo = act.requiereAcompanamiento
+            ? 'Acompañada (requiere tu apoyo)'
+            : 'Autónoma (el niño puede hacerla solo)';
         buffer.writeln('${i + 1}. **${act.nombre}** (${act.nivelDificultad}):');
         buffer.writeln('   - *Tipo:* $tipo');
-        buffer.writeln('   - *Instrucciones:* ${act.instrucciones ?? "Sin instrucciones específicas."}');
+        buffer.writeln(
+            '   - *Instrucciones:* ${act.instrucciones ?? "Sin instrucciones específicas."}');
         if (i < plan.actividades.length - 1) buffer.writeln();
       }
       buffer.writeln();
-      buffer.writeln('¿Tienes alguna duda sobre cómo ejecutar alguna de ellas en casa?');
+      buffer.writeln(
+          '¿Tienes alguna duda sobre cómo ejecutar alguna de ellas en casa?');
       return buffer.toString();
     }
 
@@ -151,12 +159,14 @@ class _FamilyChatbotScreenState extends ConsumerState<FamilyChatbotScreen> {
       }
 
       final buffer = StringBuffer();
-      buffer.writeln('Aquí tienes las rutinas de regulación que has registrado para **$nombre**:');
+      buffer.writeln(
+          'Aquí tienes las rutinas de regulación que has registrado para **$nombre**:');
       for (final r in perfil.rutinasRegulacion) {
         buffer.writeln('• $r');
       }
       buffer.writeln();
-      buffer.writeln('Estas rutinas son esenciales para el terapeuta al planificar las actividades. ¿Te gustaría saber más sobre cómo aplicarlas durante las crisis sensoriales?');
+      buffer.writeln(
+          'Estas rutinas son esenciales para el terapeuta al planificar las actividades. ¿Te gustaría saber más sobre cómo aplicarlas durante las crisis sensoriales?');
       return buffer.toString();
     }
 
@@ -166,19 +176,25 @@ class _FamilyChatbotScreenState extends ConsumerState<FamilyChatbotScreen> {
         query.contains('medicamento') ||
         query.contains('medicamentos') ||
         query.contains('remedio')) {
-      if (perfil == null || perfil.medicacionActual == null || perfil.medicacionActual!.trim().isEmpty) {
+      if (perfil == null ||
+          perfil.medicacionActual == null ||
+          perfil.medicacionActual!.trim().isEmpty) {
         return 'No tienes registrada ninguna medicación actual para $nombre.\n\n*Nota:* Recuerda que cualquier administración de medicamentos debe estar siempre supervisada y recetada por su neuropediatra o pediatra de cabecera.';
       }
       return 'De acuerdo al perfil clínico registrado para **$nombre**, su medicación actual consiste en:\n\n${perfil.medicacionActual}\n\n*Recuerda:* Si hay algún cambio en su dosis o tratamiento, asegúrate de actualizar el registro en la aplicación familiar y notificar a su terapeuta.';
     }
 
     // 4. Preguntas sobre objetivos de intervención
-    if (query.contains('objetivo') || query.contains('objetivos') || query.contains('meta') || query.contains('metas')) {
+    if (query.contains('objetivo') ||
+        query.contains('objetivos') ||
+        query.contains('meta') ||
+        query.contains('metas')) {
       if (perfil == null || perfil.objetivosIntervencion.isEmpty) {
         return 'Aún no se han configurado objetivos terapéuticos específicos para $nombre en su perfil clínico. El terapeuta los establecerá tan pronto valide clínicamente el caso.';
       }
       final buffer = StringBuffer();
-      buffer.writeln('Los objetivos terapéuticos actuales establecidos para **$nombre** son:');
+      buffer.writeln(
+          'Los objetivos terapéuticos actuales establecidos para **$nombre** son:');
       for (var i = 0; i < perfil.objetivosIntervencion.length; i++) {
         buffer.writeln('${i + 1}. ${perfil.objetivosIntervencion[i]}');
       }
@@ -186,7 +202,10 @@ class _FamilyChatbotScreenState extends ConsumerState<FamilyChatbotScreen> {
     }
 
     // 5. Preguntas generales sobre TEA
-    if (query.contains('que es') || query.contains('qué es') || query.contains('tea') || query.contains('autismo')) {
+    if (query.contains('que es') ||
+        query.contains('qué es') ||
+        query.contains('tea') ||
+        query.contains('autismo')) {
       return 'El **Trastorno del Espectro Autista (TEA)** es una condición del neurodesarrollo que influye en cómo las personas perciben el mundo e interactúan con los demás. Se caracteriza principalmente por:\n\n'
           '• **Diferencias en la comunicación y el juego social:** Van desde la ausencia del habla o ecolalia, hasta dificultades en interpretar expresiones faciales u metáforas.\n'
           '• **Intereses enfocados y conductas repetitivas:** Gusto por mantener rutinas fijas, movimientos como el aleteo (stimming) que les ayudan a autorregularse, e intereses profundos en temas específicos (como trenes o dinosaurios).\n'
@@ -194,7 +213,10 @@ class _FamilyChatbotScreenState extends ConsumerState<FamilyChatbotScreen> {
           'Cada niño es único y progresa a su propio ritmo. ¡El apoyo oportuno y el trabajo conjunto en casa y terapia marcan una gran diferencia!';
     }
 
-    if (query.contains('aleteo') || query.contains('stimming') || query.contains('repetitivo') || query.contains('balanceo')) {
+    if (query.contains('aleteo') ||
+        query.contains('stimming') ||
+        query.contains('repetitivo') ||
+        query.contains('balanceo')) {
       return 'Los comportamientos repetitivos, como el **aleteo de manos (stimming)** o el balanceo, son herramientas naturales de **autorregulación**. Los niños con TEA los utilizan para calmarse ante la sobrecarga sensorial o emocional, o para expresar emoción extrema.\n\n'
           '**¿Qué hacer?**\n'
           '• No reprimas el stimming a menos que sea autolesivo.\n'
@@ -202,12 +224,20 @@ class _FamilyChatbotScreenState extends ConsumerState<FamilyChatbotScreen> {
           '• Si es por estrés, acompáñalo a un lugar tranquilo y utiliza sus objetos reguladores o presiones profundas.';
     }
 
-    if (query.contains('ruido') || query.contains('ruidos') || query.contains('hiper') || query.contains('sensorial')) {
-      final tieneHipersensibilidad = perfil?.perfilSensorial['hipersensibilidad'] != null &&
-          (perfil!.perfilSensorial['hipersensibilidad'] as List).isNotEmpty;
-      
-      final evitaciones = tieneHipersensibilidad 
-          ? '\n\nPara **$nombre**, tienes registrado que suele evitar: ' + (perfil.perfilSensorial['hipersensibilidad'] as List).join(', ').toLowerCase() + '.'
+    if (query.contains('ruido') ||
+        query.contains('ruidos') ||
+        query.contains('hiper') ||
+        query.contains('sensorial')) {
+      final tieneHipersensibilidad =
+          perfil?.perfilSensorial['hipersensibilidad'] != null &&
+              (perfil!.perfilSensorial['hipersensibilidad'] as List).isNotEmpty;
+
+      final evitaciones = tieneHipersensibilidad
+          ? '\n\nPara **$nombre**, tienes registrado que suele evitar: ' +
+              (perfil.perfilSensorial['hipersensibilidad'] as List)
+                  .join(', ')
+                  .toLowerCase() +
+              '.'
           : '';
 
       return 'La **hipersensibilidad sensorial** es muy común. Estímulos cotidianos como la licuadora, el secador de pelo o centros comerciales concurridos pueden ser percibidos como dolorosos o abrumadores.$evitaciones\n\n'
@@ -234,7 +264,7 @@ class _FamilyChatbotScreenState extends ConsumerState<FamilyChatbotScreen> {
       backgroundColor: _kBg,
       appBar: const RimAITopBar(
         title: 'Asistente IA Familiar',
-        leadingIcon: Icons.psychology_rounded,
+        leadingIcon: Icons.forum_rounded,
         iconColor: _kPrimary,
       ),
       body: familyDataAsync.when(
@@ -261,7 +291,8 @@ class _FamilyChatbotScreenState extends ConsumerState<FamilyChatbotScreen> {
 
           final selectedNino = pacientes.isEmpty
               ? null
-              : pacientes.firstWhere((p) => p.id == _selectedNinoId, orElse: () => pacientes.first);
+              : pacientes.firstWhere((p) => p.id == _selectedNinoId,
+                  orElse: () => pacientes.first);
 
           return Consumer(
             builder: (context, ref, child) {
@@ -282,21 +313,25 @@ class _FamilyChatbotScreenState extends ConsumerState<FamilyChatbotScreen> {
                   if (pacientes.isNotEmpty)
                     Container(
                       color: _kSurface,
-                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 24, vertical: 12),
                       child: Row(
                         children: [
-                          const Icon(Icons.child_care_rounded, color: _kPrimary, size: 20),
+                          const Icon(Icons.child_care_rounded,
+                              color: _kPrimary, size: 20),
                           const SizedBox(width: 10),
                           const Text(
                             'Consultando sobre:',
-                            style: TextStyle(fontWeight: FontWeight.bold, color: _kSubtext),
+                            style: TextStyle(
+                                fontWeight: FontWeight.bold, color: _kSubtext),
                           ),
                           const Spacer(),
                           DropdownButtonHideUnderline(
                             child: DropdownButton<String>(
                               value: _selectedNinoId,
                               dropdownColor: _kSurface,
-                              icon: const Icon(Icons.arrow_drop_down, color: _kPrimary),
+                              icon: const Icon(Icons.arrow_drop_down,
+                                  color: _kPrimary),
                               style: const TextStyle(
                                 fontWeight: FontWeight.bold,
                                 color: _kPrimary,
@@ -307,10 +342,13 @@ class _FamilyChatbotScreenState extends ConsumerState<FamilyChatbotScreen> {
                                   setState(() {
                                     _selectedNinoId = val;
                                     // Agregar mensaje informando el cambio de contexto
-                                    final pName = pacientes.firstWhere((p) => p.id == val).nombre;
+                                    final pName = pacientes
+                                        .firstWhere((p) => p.id == val)
+                                        .nombre;
                                     _messages.add(
                                       ChatMessage(
-                                        text: 'Cambiando el asistente al contexto de **$pName**. Ahora mis respuestas considerarán sus datos particulares de regulación y actividades de sesión.',
+                                        text:
+                                            'Cambiando el asistente al contexto de **$pName**. Ahora mis respuestas considerarán sus datos particulares de regulación y actividades de sesión.',
                                         isUser: false,
                                         timestamp: DateTime.now(),
                                       ),
@@ -368,7 +406,7 @@ class _FamilyChatbotScreenState extends ConsumerState<FamilyChatbotScreen> {
         },
         items: [
           BottomNavItem(icon: Icons.home_rounded, label: 'Inicio'),
-          BottomNavItem(icon: Icons.psychology_rounded, label: 'Asistente IA'),
+          BottomNavItem(icon: Icons.forum_rounded, label: 'Asistente IA'),
         ],
       ),
     );
@@ -510,12 +548,25 @@ class _FamilyChatbotScreenState extends ConsumerState<FamilyChatbotScreen> {
     );
   }
 
-  Widget _buildSuggestionChips(String ninoNombre, PacientePerfil? perfil, PlanData? plan) {
+  Widget _buildSuggestionChips(
+      String ninoNombre, PacientePerfil? perfil, PlanData? plan) {
     final chips = [
-      ('📊 ¿Qué actividades tiene hoy?', '¿Qué actividades tiene programadas $ninoNombre hoy?'),
-      ('🧘‍♂️ ¿Cómo puedo ayudarlo a regularse?', '¿Cómo puedo ayudar a regularse a $ninoNombre?'),
-      ('📘 ¿Qué es el TEA y cómo influye?', '¿Qué es el TEA y cuáles son sus características principales?'),
-      ('💡 Manejo de hipersensibilidad sensorial', '¿Cómo manejar la hipersensibilidad sensorial y ruidos fuertes?'),
+      (
+        '📊 ¿Qué actividades tiene hoy?',
+        '¿Qué actividades tiene programadas $ninoNombre hoy?'
+      ),
+      (
+        '🧘‍♂️ ¿Cómo puedo ayudarlo a regularse?',
+        '¿Cómo puedo ayudar a regularse a $ninoNombre?'
+      ),
+      (
+        '📘 ¿Qué es el TEA y cómo influye?',
+        '¿Qué es el TEA y cuáles son sus características principales?'
+      ),
+      (
+        '💡 Manejo de hipersensibilidad sensorial',
+        '¿Cómo manejar la hipersensibilidad sensorial y ruidos fuertes?'
+      ),
     ];
 
     return Container(
@@ -587,16 +638,19 @@ class _FamilyChatbotScreenState extends ConsumerState<FamilyChatbotScreen> {
                     color: _kSubtext.withValues(alpha: 0.5),
                     fontSize: 14,
                   ),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
                   border: InputBorder.none,
                 ),
-                onSubmitted: (val) => _handleSend(val, perfil: perfil, plan: plan),
+                onSubmitted: (val) =>
+                    _handleSend(val, perfil: perfil, plan: plan),
               ),
             ),
           ),
           const SizedBox(width: 14),
           IconButton.filled(
-            onPressed: () => _handleSend(_controller.text, perfil: perfil, plan: plan),
+            onPressed: () =>
+                _handleSend(_controller.text, perfil: perfil, plan: plan),
             icon: const Icon(Icons.send_rounded),
             style: IconButton.styleFrom(
               backgroundColor: _kPrimary,

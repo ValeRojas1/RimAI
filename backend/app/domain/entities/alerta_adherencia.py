@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Union
 from enum import Enum
 from datetime import datetime
 
@@ -10,8 +10,8 @@ class SeveridadAlerta(str, Enum):
 
 class AlertaAdherencia(BaseModel):
     id: Optional[int] = None
-    patient_id: int
-    terapeuta_id: int
+    patient_id: Union[int, str]
+    terapeuta_id: Union[int, str]
     severidad: SeveridadAlerta
     mensaje: str
     tasa_actual: float

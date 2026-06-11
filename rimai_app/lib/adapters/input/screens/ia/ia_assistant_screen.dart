@@ -50,7 +50,7 @@ class _IAAssistantScreenState extends ConsumerState<IAAssistantScreen> {
               },
               items: [
                 BottomNavItem(icon: Icons.home, label: 'Inicio'),
-                BottomNavItem(icon: Icons.assignment, label: 'Plan'),
+                BottomNavItem(icon: Icons.spatial_audio_off, label: 'Sesion'),
                 BottomNavItem(icon: Icons.auto_awesome, label: 'Apoyo'),
                 BottomNavItem(icon: Icons.insights, label: 'Progreso'),
               ],
@@ -209,15 +209,25 @@ class _SessionReviewCardState extends ConsumerState<_SessionReviewCard> {
                 'Aun no hay sesiones completadas para revisar.',
                 style: TextStyle(color: Color(0xFF58423B), height: 1.35),
               ),
-            ...sesiones.map(_buildSessionBlock),
+            ..._buildSessionBlocks(sesiones),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildSessionBlock(SesionRevisionData sesion) {
+  List<Widget> _buildSessionBlocks(List<SesionRevisionData> sesiones) {
+    var activityNumber = 1;
+    return sesiones.map((sesion) {
+      final startNumber = activityNumber;
+      activityNumber += sesion.actividades.length;
+      return _buildSessionBlock(sesion, startNumber);
+    }).toList();
+  }
+
+  Widget _buildSessionBlock(SesionRevisionData sesion, int startNumber) {
     final pct = (sesion.tasaAciertos * 100).round();
+    final activityCount = sesion.actividades.length;
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.all(16),
@@ -231,33 +241,69 @@ class _SessionReviewCardState extends ConsumerState<_SessionReviewCard> {
         children: [
           Row(
             children: [
-              Expanded(
-                child: Text(
-                  'Sesion ${sesion.sesionNumero}',
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w800,
-                    color: Color(0xFF1E1B16),
-                  ),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Sesion de apoyo',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                        color: Color(0xFF1E1B16),
+                      ),
+                    ),
+                    SizedBox(height: 3),
+                    Text(
+                      'Actividades completadas por la familia',
+                      style: TextStyle(
+                        color: Color(0xFF58423B),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              Text(
-                '$pct% aciertos',
-                style: const TextStyle(
-                  color: Color(0xFF4A624D),
-                  fontWeight: FontWeight.bold,
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE8F5E9),
+                  borderRadius: BorderRadius.circular(100),
+                ),
+                child: Text(
+                  '$pct% aciertos',
+                  style: const TextStyle(
+                    color: Color(0xFF4A624D),
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12,
+                  ),
                 ),
               ),
             ],
           ),
+          const SizedBox(height: 8),
+          Text(
+            '$activityCount ${activityCount == 1 ? 'actividad realizada' : 'actividades realizadas'}',
+            style: const TextStyle(color: Color(0xFF58423B), fontSize: 12),
+          ),
           const SizedBox(height: 12),
-          ...sesion.actividades.map(_buildActivityReview),
+          ...sesion.actividades.asMap().entries.map(
+                (entry) => _buildActivityReview(
+                  entry.value,
+                  startNumber + entry.key,
+                ),
+              ),
         ],
       ),
     );
   }
 
-  Widget _buildActivityReview(ActividadRevisionSesion actividad) {
+  Widget _buildActivityReview(
+    ActividadRevisionSesion actividad,
+    int activityNumber,
+  ) {
     final solicitud = actividad.solicitudAjuste;
     final pct = (actividad.tasaAciertos * 100).round();
     final ayuda = switch (actividad.nivelAyudaRequerido) {
@@ -275,9 +321,34 @@ class _SessionReviewCardState extends ConsumerState<_SessionReviewCard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            actividad.actividadNombre,
-            style: const TextStyle(fontWeight: FontWeight.bold),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFAF2E9),
+                  borderRadius: BorderRadius.circular(100),
+                  border: Border.all(color: const Color(0xFFE9E1D8)),
+                ),
+                child: Text(
+                  'Actividad $activityNumber',
+                  style: const TextStyle(
+                    color: Color(0xFF4A624D),
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  actividad.actividadNombre,
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 6),
           Text(
@@ -304,19 +375,34 @@ class _SessionReviewCardState extends ConsumerState<_SessionReviewCard> {
     final pending = solicitud.estado == 'pendiente';
     final accion = solicitud.accion == 'reducir' ? 'reducir' : 'aumentar';
     final resolving = _resolving.contains(solicitud.id);
+    final approved = solicitud.estado == 'aprobada';
+    final statusColor = pending
+        ? const Color(0xFFFFF2CC)
+        : approved
+            ? const Color(0xFFE8F5E9)
+            : const Color(0xFFFFEDEA);
+    final statusBorderColor = pending
+        ? const Color(0xFFF1D88A)
+        : approved
+            ? const Color(0xFFC8E6C9)
+            : const Color(0xFFF3C2BC);
+    final statusText = pending
+        ? 'Solicitud para $accion dificultad'
+        : approved
+            ? 'Solicitud aprobada'
+            : 'Solicitud rechazada';
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: pending ? const Color(0xFFFFF2CC) : const Color(0xFFE8F5E9),
+        color: statusColor,
         borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: statusBorderColor),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            pending
-                ? 'Solicitud para $accion dificultad'
-                : 'Solicitud ${solicitud.estado}',
+            statusText,
             style: const TextStyle(
               fontWeight: FontWeight.bold,
               color: Color(0xFF1E1B16),
@@ -332,22 +418,46 @@ class _SessionReviewCardState extends ConsumerState<_SessionReviewCard> {
             Row(
               children: [
                 Expanded(
+                  flex: 11,
                   child: OutlinedButton(
                     onPressed:
                         resolving ? null : () => _resolver(solicitud, false),
-                    child: const Text('Rechazar'),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      minimumSize: const Size(0, 48),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    child: const FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        'Rechazar',
+                        maxLines: 1,
+                        softWrap: false,
+                      ),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
+                  flex: 10,
                   child: ElevatedButton(
                     onPressed:
                         resolving ? null : () => _resolver(solicitud, true),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF4A624D),
                       foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      minimumSize: const Size(0, 48),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     ),
-                    child: Text(resolving ? 'Guardando...' : 'Aprobar'),
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        resolving ? 'Guardando...' : 'Aprobar',
+                        maxLines: 1,
+                        softWrap: false,
+                      ),
+                    ),
                   ),
                 ),
               ],

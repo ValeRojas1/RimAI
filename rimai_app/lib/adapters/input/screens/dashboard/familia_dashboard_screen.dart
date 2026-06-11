@@ -16,8 +16,6 @@ const _kText = Color(0xFF2A2825);
 const _kSub = Color(0xFF6B6661);
 const _kBdr = Color(0xFFE2E0D9);
 
-
-
 // ── Screen ────────────────────────────────────────────────────────────────────
 class FamiliaDashboardScreen extends ConsumerStatefulWidget {
   const FamiliaDashboardScreen({super.key});
@@ -495,7 +493,8 @@ class _State extends ConsumerState<FamiliaDashboardScreen> {
                   },
                   items: [
                     BottomNavItem(icon: Icons.home_rounded, label: 'Inicio'),
-                    BottomNavItem(icon: Icons.psychology_rounded, label: 'Asistente IA'),
+                    BottomNavItem(
+                        icon: Icons.forum_rounded, label: 'Asistente IA'),
                   ],
                 ),
         );
@@ -582,7 +581,8 @@ class _State extends ConsumerState<FamiliaDashboardScreen> {
             SizedBox(
                 width: double.infinity,
                 child: OutlinedButton.icon(
-                  icon: const Icon(Icons.add, color: Color(0xFFB08C68), size: 20),
+                  icon:
+                      const Icon(Icons.add, color: Color(0xFFB08C68), size: 20),
                   label: const Text('Registrar otro niño'),
                   onPressed: () => setState(() {
                     _reset();
@@ -685,8 +685,7 @@ class _State extends ConsumerState<FamiliaDashboardScreen> {
         padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
         decoration: BoxDecoration(
             color: _kBg,
-            border:
-                Border(top: BorderSide(color: _kBdr.withOpacity(0.5)))),
+            border: Border(top: BorderSide(color: _kBdr.withOpacity(0.5)))),
         child: Row(children: [
           if (_step > 0) ...[
             Expanded(
@@ -736,7 +735,8 @@ class _State extends ConsumerState<FamiliaDashboardScreen> {
   Widget _topBar(
       {required bool showAdd, bool canBack = false, VoidCallback? onBack}) {
     final notifAsync = ref.watch(notificacionesProvider);
-    final unreadCount = notifAsync.valueOrNull?.where((n) => !n.leido).length ?? 0;
+    final unreadCount =
+        notifAsync.valueOrNull?.where((n) => !n.leido).length ?? 0;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -799,7 +799,8 @@ class _State extends ConsumerState<FamiliaDashboardScreen> {
             isLabelVisible: unreadCount > 0,
             label: Text('$unreadCount'),
             backgroundColor: _kP,
-            child: const Icon(Icons.notifications_active_outlined, color: _kSub, size: 22),
+            child: const Icon(Icons.notifications_active_outlined,
+                color: _kSub, size: 22),
           ),
           tooltip: 'Notificaciones',
           onPressed: () => _mostrarNotificacionesModal(),
@@ -899,7 +900,8 @@ class _State extends ConsumerState<FamiliaDashboardScreen> {
                           );
                         }
                         return ListView.builder(
-                          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 24, vertical: 16),
                           itemCount: list.length,
                           itemBuilder: (context, index) {
                             final n = list[index];
@@ -932,7 +934,8 @@ class _State extends ConsumerState<FamiliaDashboardScreen> {
                                       children: [
                                         if (!n.leido)
                                           Container(
-                                            margin: const EdgeInsets.only(right: 8),
+                                            margin:
+                                                const EdgeInsets.only(right: 8),
                                             width: 8,
                                             height: 8,
                                             decoration: const BoxDecoration(
@@ -952,20 +955,27 @@ class _State extends ConsumerState<FamiliaDashboardScreen> {
                                         ),
                                         if (!n.leido)
                                           IconButton(
-                                            icon: const Icon(Icons.done, size: 18, color: _kP),
+                                            icon: const Icon(Icons.done,
+                                                size: 18, color: _kP),
                                             tooltip: 'Marcar como leída',
                                             constraints: const BoxConstraints(),
                                             padding: EdgeInsets.zero,
                                             onPressed: () async {
                                               try {
                                                 await ref
-                                                    .read(dashboardServiceProvider)
-                                                    .marcarNotificacionLeida(n.id);
-                                                ref.invalidate(notificacionesProvider);
+                                                    .read(
+                                                        dashboardServiceProvider)
+                                                    .marcarNotificacionLeida(
+                                                        n.id);
+                                                ref.invalidate(
+                                                    notificacionesProvider);
                                               } catch (e) {
                                                 if (context.mounted) {
-                                                  ScaffoldMessenger.of(context).showSnackBar(
-                                                    SnackBar(content: Text('Error: $e')),
+                                                  ScaffoldMessenger.of(context)
+                                                      .showSnackBar(
+                                                    SnackBar(
+                                                        content:
+                                                            Text('Error: $e')),
                                                   );
                                                 }
                                               }
@@ -1104,7 +1114,6 @@ class _State extends ConsumerState<FamiliaDashboardScreen> {
                     ],
                     _rep),
                 const SizedBox(height: 20),
-
                 _editableRows(
                   label: 'RUTINAS DE REGULACION',
                   hint: 'Ej: presion profunda, balanceo, objeto preferido',
@@ -1139,13 +1148,16 @@ class _State extends ConsumerState<FamiliaDashboardScreen> {
                     _int),
                 const SizedBox(height: 24),
                 InkWell(
-                  onTap: () => setState(() => _antecedentesExpanded = !_antecedentesExpanded),
+                  onTap: () => setState(
+                      () => _antecedentesExpanded = !_antecedentesExpanded),
                   borderRadius: BorderRadius.circular(12),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(vertical: 4),
                     child: Row(
                       children: [
-                        Expanded(child: _label('ANTECEDENTES CLÍNICOS Y MEDICACIÓN (OPCIONAL)')),
+                        Expanded(
+                            child: _label(
+                                'ANTECEDENTES CLÍNICOS Y MEDICACIÓN (OPCIONAL)')),
                         Icon(
                           _antecedentesExpanded
                               ? Icons.keyboard_arrow_up
@@ -1215,11 +1227,15 @@ class _State extends ConsumerState<FamiliaDashboardScreen> {
                       const Divider(color: Color(0xFFE2E0D9), height: 16),
                       _summaryRow('Comunicación:', _com),
                       const Divider(color: Color(0xFFE2E0D9), height: 16),
-                      _summaryRow('Intereses:',
-                          _int.isEmpty ? 'Ninguno seleccionado' : _int.join(', ')),
+                      _summaryRow(
+                          'Intereses:',
+                          _int.isEmpty
+                              ? 'Ninguno seleccionado'
+                              : _int.join(', ')),
                       const SizedBox(height: 16),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 12),
                         decoration: BoxDecoration(
                           color: const Color(0xFFE2ECE0),
                           borderRadius: BorderRadius.circular(16),
@@ -1290,17 +1306,16 @@ class _State extends ConsumerState<FamiliaDashboardScreen> {
         width: double.infinity,
         padding: const EdgeInsets.all(24),
         decoration: BoxDecoration(
-          color: backgroundColor ?? _kSurf,
-          borderRadius: BorderRadius.circular(24),
-          border: Border.all(color: _kBdr.withOpacity(0.5), width: 1.0),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.01),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
-            )
-          ]
-        ),
+            color: backgroundColor ?? _kSurf,
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: _kBdr.withOpacity(0.5), width: 1.0),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.01),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              )
+            ]),
         child: child,
       );
 
@@ -1328,7 +1343,8 @@ class _State extends ConsumerState<FamiliaDashboardScreen> {
         focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(16),
             borderSide: const BorderSide(color: _kA, width: 1.5)),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
         hintStyle: GoogleFonts.plusJakartaSans(
             color: _kSub.withOpacity(0.4),
             fontSize: 14,
@@ -1446,9 +1462,7 @@ class _State extends ConsumerState<FamiliaDashboardScreen> {
           width: double.infinity,
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
           decoration: BoxDecoration(
-            color: hasFile
-                ? _kA.withOpacity(0.08)
-                : Colors.white,
+            color: hasFile ? _kA.withOpacity(0.08) : Colors.white,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
               color: hasFile ? _kA : _kBdr,
@@ -1475,8 +1489,7 @@ class _State extends ConsumerState<FamiliaDashboardScreen> {
                   ),
                 ),
               ),
-              if (hasFile)
-                const Icon(Icons.check, size: 16, color: _kA),
+              if (hasFile) const Icon(Icons.check, size: 16, color: _kA),
             ],
           ),
         ),
@@ -1557,9 +1570,7 @@ class _State extends ConsumerState<FamiliaDashboardScreen> {
           children: [
             Text(key,
                 style: GoogleFonts.plusJakartaSans(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                    color: _kSub)),
+                    fontSize: 13, fontWeight: FontWeight.w500, color: _kSub)),
             const SizedBox(width: 12),
             Expanded(
               child: Text(val,
@@ -1795,7 +1806,8 @@ class _PatientCard extends ConsumerWidget {
               ])),
           IconButton(
             tooltip: 'Editar registro',
-            icon: const Icon(Icons.edit_outlined, color: Color(0xFF9CA3AF), size: 20),
+            icon: const Icon(Icons.edit_outlined,
+                color: Color(0xFF9CA3AF), size: 20),
             onPressed: onEdit,
           ),
           IconButton(

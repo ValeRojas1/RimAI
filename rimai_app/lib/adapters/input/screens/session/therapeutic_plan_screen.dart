@@ -61,7 +61,7 @@ class _TherapeuticPlanScreenState extends ConsumerState<TherapeuticPlanScreen> {
         },
         items: [
           BottomNavItem(icon: Icons.home, label: 'Inicio'),
-          BottomNavItem(icon: Icons.spatial_audio_off, label: 'Plan'),
+          BottomNavItem(icon: Icons.spatial_audio_off, label: 'Sesion'),
           BottomNavItem(icon: Icons.auto_awesome, label: 'Apoyo'),
           BottomNavItem(icon: Icons.insights, label: 'Progreso'),
         ],

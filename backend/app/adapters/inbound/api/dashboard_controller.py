@@ -35,17 +35,19 @@ from pydantic import BaseModel
 from app.adapters.inbound.api.dependencies import get_current_user
 from app.adapters.outbound.storage.cloud_storage_adapter import CloudStorageAdapter
 from app.ai.motor import motor_adaptativo
+from app.infrastructure.authorization import (
+    autorizar_acceso_nino,
+    campos_perfil_editables_por_rol,
+    resolve_nino_id_for_clinical_file,
+)
+from app.infrastructure.config import evaluar_alertas_en_resumen
+from app.infrastructure.database import get_connection
 
 router = APIRouter(tags=["dashboard"])
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://rimai_user:rimai_secure_2026@db:5432/rimai_db",
-)
-
 
 def _conn():
-    return psycopg2.connect(DATABASE_URL)
+    return get_connection()
 
 
 def _crear_notificacion_tutor(cur, nino_id, titulo, mensaje):
@@ -185,6 +187,10 @@ def descargar_documento_clinico(
     current_user: dict = Depends(get_current_user),
 ):
     safe_name = os.path.basename(filename)
+    nino_id = resolve_nino_id_for_clinical_file(safe_name)
+    if not nino_id:
+        raise HTTPException(status_code=404, detail="Documento no encontrado")
+    autorizar_acceso_nino(nino_id, current_user)
     storage = CloudStorageAdapter()
     path = os.path.join(storage.upload_dir, safe_name)
     if not os.path.isfile(path):
@@ -390,30 +396,6 @@ def _tiene_consentimiento_activo(cur, nino_id) -> bool:
         (nino_id,),
     )
     return cur.fetchone() is not None
-
-
-def _autorizar_acceso_nino(nino_id: str, current_user: Dict[str, Any]):
-    with _conn() as conn:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(
-                "SELECT terapeuta_id, tutor_id FROM ninos WHERE id = %s AND activo = TRUE",
-                (nino_id,),
-            )
-            acceso = cur.fetchone()
-            if not acceso:
-                raise HTTPException(status_code=404, detail="Niño no encontrado")
-            if current_user["role"] == "terapeuta":
-                cur.execute("SELECT id FROM terapeutas WHERE usuario_id = %s", (current_user["id"],))
-                ter = cur.fetchone()
-                if not ter or acceso["terapeuta_id"] != ter["id"]:
-                    raise HTTPException(status_code=403, detail="Acceso denegado al nino")
-            elif current_user["role"] in ("padre_tutor", "tutor", "padre"):
-                cur.execute("SELECT id FROM padres_tutores WHERE usuario_id = %s", (current_user["id"],))
-                tutor = cur.fetchone()
-                if not tutor or acceso["tutor_id"] != tutor["id"]:
-                    raise HTTPException(status_code=403, detail="Acceso denegado al nino")
-            elif current_user["role"] != "admin":
-                raise HTTPException(status_code=403, detail="Acceso denegado")
 
 
 def _perfil_tiene_evidencia_clinica(
@@ -1527,7 +1509,8 @@ def resumen_terapeuta(current_user: dict = Depends(get_current_user)):
                 raise HTTPException(status_code=404, detail="Terapeuta no encontrado")
 
             terapeuta_id = str(ter["terapeuta_id"])
-            _evaluar_alertas_clinicas(cur, ter["terapeuta_id"])
+            if evaluar_alertas_en_resumen():
+                _evaluar_alertas_clinicas(cur, ter["terapeuta_id"])
 
             # 2. Pacientes activos asignados
             cur.execute(
@@ -4350,7 +4333,11 @@ def obtener_sesiones_revision(
             detalle = {}
         solicitud_id = detalle.get("solicitud_id")
         if solicitud_id:
-            resoluciones[str(solicitud_id)] = {"accion": row["accion"], "created_at": row["created_at"].isoformat(), **detalle}
+            resoluciones[str(solicitud_id)] = {
+                **detalle,
+                "accion_resolucion": row["accion"],
+                "created_at": row["created_at"].isoformat(),
+            }
             continue
         if row["accion"] in ("SOLICITAR_AUMENTAR_DIFICULTAD", "SOLICITAR_REDUCIR_DIFICULTAD"):
             detalle["id"] = str(row["id"])
@@ -4361,7 +4348,7 @@ def obtener_sesiones_revision(
     for solicitud_id, resolucion in resoluciones.items():
         if solicitud_id in solicitudes:
             solicitudes[solicitud_id]["estado"] = (
-                "aprobada" if resolucion["accion"] in ("AUMENTAR_DIFICULTAD", "REDUCIR_DIFICULTAD") else "rechazada"
+                "aprobada" if resolucion["accion_resolucion"] in ("AUMENTAR_DIFICULTAD", "REDUCIR_DIFICULTAD") else "rechazada"
             )
             solicitudes[solicitud_id]["resolucion"] = resolucion
 
@@ -4506,8 +4493,10 @@ def actualizar_perfil_clinico(
     datos: Dict[str, Any],
     current_user: dict = Depends(get_current_user),
 ):
-    campos_permitidos = {"nivel_cognitivo", "diagnostico", "perfil_sensorial",
-                         "objetivos_intervencion", "estado_clinico"}
+    autorizar_acceso_nino(nino_id, current_user)
+    campos_permitidos = campos_perfil_editables_por_rol(current_user.get("role", ""))
+    if current_user.get("role") == "admin":
+        campos_permitidos = campos_perfil_editables_por_rol("terapeuta")
     updates = {k: v for k, v in datos.items() if k in campos_permitidos}
     observaciones = datos.get("observaciones_clinicas")
 
@@ -4896,7 +4885,7 @@ def obtener_progreso(
     periodo: str = "Esta semana",
     current_user: dict = Depends(get_current_user),
 ):
-    _autorizar_acceso_nino(nino_id, current_user)
+    autorizar_acceso_nino(nino_id, current_user)
     with _conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             # Filtro de fecha según período
@@ -5488,7 +5477,7 @@ def obtener_cumplimiento_proteccion_datos(
     if current_user["role"] not in ("terapeuta", "admin", "padre_tutor", "tutor"):
         raise HTTPException(status_code=403, detail="Acceso denegado al modulo de cumplimiento")
     if nino_id:
-        _autorizar_acceso_nino(nino_id, current_user)
+        autorizar_acceso_nino(nino_id, current_user)
 
     with _conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:

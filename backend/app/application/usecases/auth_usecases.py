@@ -4,11 +4,9 @@ from jose import jwt
 from datetime import datetime, timedelta
 from app.application.ports.user_repository import IUserRepository
 from app.domain.entities.user import User
-import os
+from app.infrastructure.config import get_jwt_algorithm, get_jwt_secret
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-SECRET_KEY = os.getenv("JWT_SECRET", "super-secret-key-rimai-2024")
-ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7
 
 class AuthUseCases:
@@ -30,7 +28,9 @@ class AuthUseCases:
         else:
             expire = datetime.utcnow() + timedelta(minutes=15)
         to_encode.update({"exp": expire})
-        encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+        encoded_jwt = jwt.encode(
+            to_encode, get_jwt_secret(), algorithm=get_jwt_algorithm()
+        )
         return encoded_jwt
 
     def login(self, email: str, password: str) -> dict:

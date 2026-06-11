@@ -1,6 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 from app.application.usecases.auth_usecases import AuthUseCases
+from app.infrastructure.config import allow_public_register
+from app.infrastructure.rate_limit import limiter
 from .dependencies import get_auth_use_cases, get_current_user, get_user_repository
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
@@ -15,9 +17,14 @@ class RegisterRequest(BaseModel):
     password: str
 
 @router.post("/login")
-def login(request: LoginRequest, auth_uc: AuthUseCases = Depends(get_auth_use_cases)):
+@limiter.limit("5/minute")
+def login(
+    request: Request,
+    body: LoginRequest,
+    auth_uc: AuthUseCases = Depends(get_auth_use_cases),
+):
     try:
-        return auth_uc.login(request.email, request.password)
+        return auth_uc.login(body.email, body.password)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -26,9 +33,19 @@ def login(request: LoginRequest, auth_uc: AuthUseCases = Depends(get_auth_use_ca
         )
 
 @router.post("/register")
-def register(request: RegisterRequest, auth_uc: AuthUseCases = Depends(get_auth_use_cases)):
+@limiter.limit("3/hour")
+def register(
+    request: Request,
+    body: RegisterRequest,
+    auth_uc: AuthUseCases = Depends(get_auth_use_cases),
+):
+    if not allow_public_register():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="El registro público está deshabilitado. Solicite una invitación al terapeuta.",
+        )
     try:
-        return auth_uc.register_family_user(request.nombre, request.email, request.password)
+        return auth_uc.register_family_user(body.nombre, body.email, body.password)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 

@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from typing import List, Dict, Any
 from app.application.usecases.generar_plan_sugerido_usecase import GenerarPlanSugeridoUseCase
 from app.domain.entities.plan_terapeutico import SugerenciaActividad
+from app.infrastructure.authorization import verify_terapeuta_assigned_to_patient
 from .dependencies import get_plan_use_cases, get_current_user
 
 router = APIRouter(prefix="/api/v1/planes", tags=["planes"])
@@ -21,7 +22,10 @@ class ValidarPlanRequest(BaseModel):
 
 @router.post("/personalizar")
 def personalizar_plan(request: GenerarPlanRequest, uc: GenerarPlanSugeridoUseCase = Depends(get_plan_use_cases), current_user: dict = Depends(get_current_user)):
-    # Solo el terapeuta debería, o se genera auto en backend
+    if current_user.get("role") != "terapeuta":
+        raise HTTPException(status_code=403, detail="Solo terapeutas pueden personalizar planes.")
+    if not verify_terapeuta_assigned_to_patient(str(request.patient_id), str(current_user.get("id"))):
+        raise HTTPException(status_code=403, detail="Acceso denegado al paciente")
     terapeuta_id = current_user.get("id")
     plan = uc.execute(request.patient_id, terapeuta_id, request.perfil_sensorial)
     return plan

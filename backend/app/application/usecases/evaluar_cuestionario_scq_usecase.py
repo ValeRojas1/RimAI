@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Union
 from app.domain.entities.cuestionario_scq import CuestionarioSCQ, ResultadoScoring, NivelIndicioSCQ
 from app.application.ports.scq_repository import ISCQRepository
 
@@ -6,7 +6,13 @@ class EvaluarCuestionarioSCQUseCase:
     def __init__(self, scq_repo: ISCQRepository):
         self.scq_repo = scq_repo
 
-    def execute(self, patient_id: int, tutor_id: int, respuestas: List[int], acepto_disclaimer: bool) -> CuestionarioSCQ:
+    def execute(
+        self,
+        patient_id: Union[int, str],
+        tutor_id: Union[int, str],
+        respuestas: List[int],
+        acepto_disclaimer: bool,
+    ) -> CuestionarioSCQ:
         if not acepto_disclaimer:
             raise ValueError("Debe aceptar el aviso legal (RNF-10) antes de enviar el cuestionario.")
 

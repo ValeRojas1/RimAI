@@ -1,0 +1,78 @@
+"""Configuración centralizada desde variables de entorno."""
+import os
+
+_TEST_DEFAULTS_ALLOWED = (
+    os.getenv("PYTEST_CURRENT_TEST") is not None
+    or os.getenv("RIMAI_ALLOW_TEST_DEFAULTS") == "1"
+)
+
+_DEV_CORS_ORIGINS = (
+    "http://localhost:3000,"
+    "http://localhost:8000,"
+    "http://127.0.0.1:8000,"
+    "http://10.0.2.2:8000,"
+    "https://rimai-production.up.railway.app"
+)
+
+
+def test_defaults_allowed() -> bool:
+    return _TEST_DEFAULTS_ALLOWED
+
+
+def _require(name: str, value: str | None) -> str:
+    if value:
+        return value
+    if _TEST_DEFAULTS_ALLOWED:
+        if name == "JWT_SECRET":
+            return os.getenv("JWT_SECRET") or "test-jwt-secret-rimai-pytest-only"
+        if name == "DATABASE_URL":
+            return (
+                os.getenv("DATABASE_URL")
+                or "postgresql://rimai_user:rimai_secure_2026@localhost:5432/rimai_db"
+            )
+    raise RuntimeError(
+        f"Variable de entorno obligatoria no definida: {name}. "
+        "Configure .env o consulte .env.example."
+    )
+
+
+def get_jwt_secret() -> str:
+    return _require("JWT_SECRET", os.getenv("JWT_SECRET"))
+
+
+def get_jwt_algorithm() -> str:
+    return "HS256"
+
+
+def get_database_url() -> str:
+    return _require("DATABASE_URL", os.getenv("DATABASE_URL"))
+
+
+def get_cors_origins() -> list[str]:
+    raw = os.getenv("CORS_ORIGINS")
+    if not raw:
+        if _TEST_DEFAULTS_ALLOWED:
+            raw = _DEV_CORS_ORIGINS
+        else:
+            raise RuntimeError(
+                "Variable de entorno obligatoria no definida: CORS_ORIGINS. "
+                "Configure orígenes permitidos separados por coma."
+            )
+    return [origin.strip() for origin in raw.split(",") if origin.strip()]
+
+
+def evaluar_alertas_en_resumen() -> bool:
+    return os.getenv("EVALUAR_ALERTAS_EN_RESUMEN", "false").lower() in ("1", "true", "yes")
+
+
+def allow_public_register() -> bool:
+    default = "true" if _TEST_DEFAULTS_ALLOWED else "false"
+    return os.getenv("ALLOW_PUBLIC_REGISTER", default).lower() in ("1", "true", "yes")
+
+
+def get_db_pool_min() -> int:
+    return int(os.getenv("DB_POOL_MIN", "2"))
+
+
+def get_db_pool_max() -> int:
+    return int(os.getenv("DB_POOL_MAX", "10"))

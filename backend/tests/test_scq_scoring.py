@@ -8,6 +8,10 @@ class MockSCQRepo:
         return scq
     def get_by_patient_id(self, patient_id):
         pass
+    def verify_tutor_owns_patient(self, patient_id, tutor_user_id):
+        return True
+    def authorize_send_to_therapist(self, patient_id, tutor_user_id):
+        pass
 
 def test_scq_requires_disclaimer():
     repo = MockSCQRepo()

@@ -68,19 +68,16 @@ class DashboardScreen extends ConsumerWidget {
       bottomNavigationBar: RimAIBottomNav(
         currentIndex: 0,
         onTap: (i) {
-          final pacientes = dashboardAsync.valueOrNull?.pacientes ?? [];
           if (i == 1) {
             context.go('/terapeuta/planes');
             return;
           }
-          if (pacientes.isEmpty) return;
-          final first = pacientes.first;
-          if (i == 2) context.go('/terapeuta/ia/${first.id}');
-          if (i == 3) context.go('/terapeuta/progreso/${first.id}');
+          if (i == 2) context.go('/terapeuta/ia');
+          if (i == 3) context.go('/terapeuta/progreso');
         },
         items: [
           BottomNavItem(icon: Icons.home_rounded, label: 'Inicio'),
-          BottomNavItem(icon: Icons.spatial_audio_off, label: 'Planes'),
+          BottomNavItem(icon: Icons.spatial_audio_off, label: 'Sesion'),
           BottomNavItem(icon: Icons.auto_awesome, label: 'Apoyo'),
           BottomNavItem(icon: Icons.insights, label: 'Progreso'),
         ],
@@ -552,13 +549,13 @@ class DashboardScreen extends ConsumerWidget {
         ),
         _QuickAccessButton(
           label: 'Nueva Sesión',
-            icon: Icons.add_circle_outline_rounded,
-            onTap: () {
-              if (firstPatient != null) {
-                context.push('/terapeuta/plan/${firstPatient.id}');
-              }
-            },
-          ),
+          icon: Icons.add_circle_outline_rounded,
+          onTap: () {
+            if (firstPatient != null) {
+              context.push('/terapeuta/plan/${firstPatient.id}');
+            }
+          },
+        ),
         _QuickAccessButton(
           label: 'Actividades',
           icon: Icons.fact_check_outlined,

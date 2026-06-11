@@ -1,0 +1,28 @@
+# Producción: sin puertos DB expuestos, sin seeds demo, registro público deshabilitado.
+services:
+  db:
+    ports: !reset []
+    volumes:
+      - rimai_pgdata:/var/lib/postgresql/data
+      - ./backend/sql/01_init.sql:/docker-entrypoint-initdb.d/01_init.sql
+      - ./backend/sql/03_migration_estados.sql:/docker-entrypoint-initdb.d/03_migration_estados.sql
+      - ./backend/sql/04_migration_compat.sql:/docker-entrypoint-initdb.d/04_migration_compat.sql
+      - ./backend/sql/06_stored_procedures.sql:/docker-entrypoint-initdb.d/06_stored_procedures.sql
+      - ./backend/sql/07_migration_plan_activity_difficulty.sql:/docker-entrypoint-initdb.d/07_migration_plan_activity_difficulty.sql
+      - ./backend/sql/08_migration_business_rules.sql:/docker-entrypoint-initdb.d/08_migration_business_rules.sql
+      - ./backend/sql/09_migration_notifications.sql:/docker-entrypoint-initdb.d/09_migration_notifications.sql
+      - ./backend/sql/10_migration_clinical_alerts.sql:/docker-entrypoint-initdb.d/10_migration_clinical_alerts.sql
+      - ./backend/sql/11_migration_offline_sync.sql:/docker-entrypoint-initdb.d/11_migration_offline_sync.sql
+      - ./backend/sql/12_migration_audit_trail.sql:/docker-entrypoint-initdb.d/12_migration_audit_trail.sql
+      - ./backend/sql/13_migration_data_protection_compliance.sql:/docker-entrypoint-initdb.d/13_migration_data_protection_compliance.sql
+
+  api:
+    volumes: !reset []
+    environment:
+      ALLOW_PUBLIC_REGISTER: "false"
+
+  pgadmin:
+    profiles: ["disabled"]
+
+volumes:
+  rimai_pgdata:

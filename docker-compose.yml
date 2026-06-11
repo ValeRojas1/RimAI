@@ -1,67 +1,81 @@
-services:
-  db:
-    image: postgres:15
-    container_name: rimai_postgres
-    restart: always
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
-    ports:
-      - "5432:5432"
-    volumes:
-      - rimai_pgdata:/var/lib/postgresql/data
-      - ./backend/sql/:/docker-entrypoint-initdb.d/
-    networks:
-      - rimai_net
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  api:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: rimai_api
-    restart: always
-    environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
-      JWT_SECRET: ${JWT_SECRET:-rimai-super-secret-key-2026}
-    ports:
-      - "8000:8000"
-    volumes:
-      - ./backend:/app
-    depends_on:
-      db:
-        condition: service_healthy
-    networks:
-      - rimai_net
-
-  pgadmin:
-    image: dpage/pgadmin4:latest
-    container_name: rimai_pgadmin
-    restart: always
-    environment:
-      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL}
-      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD}
-      PGADMIN_CONFIG_SERVER_MODE: "False"
-      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
-    ports:
-      - "5050:80"
-    volumes:
-      - rimai_pgadmin_data:/var/lib/pgadmin
-    depends_on:
-      db:
-        condition: service_healthy
-    networks:
-      - rimai_net
-
-volumes:
-  rimai_pgdata:
-  rimai_pgadmin_data:
-
-networks:
-  rimai_net:
-    driver: bridge
+services:
+  db:
+    image: postgres:15
+    container_name: rimai_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "5432:5432"
+    volumes:
+      - rimai_pgdata:/var/lib/postgresql/data
+      - ./backend/sql/01_init.sql:/docker-entrypoint-initdb.d/01_init.sql
+      - ./backend/sql/03_migration_estados.sql:/docker-entrypoint-initdb.d/03_migration_estados.sql
+      - ./backend/sql/04_migration_compat.sql:/docker-entrypoint-initdb.d/04_migration_compat.sql
+      - ./backend/sql/06_stored_procedures.sql:/docker-entrypoint-initdb.d/06_stored_procedures.sql
+      - ./backend/sql/07_migration_plan_activity_difficulty.sql:/docker-entrypoint-initdb.d/07_migration_plan_activity_difficulty.sql
+      - ./backend/sql/08_migration_business_rules.sql:/docker-entrypoint-initdb.d/08_migration_business_rules.sql
+      - ./backend/sql/09_migration_notifications.sql:/docker-entrypoint-initdb.d/09_migration_notifications.sql
+      - ./backend/sql/10_migration_clinical_alerts.sql:/docker-entrypoint-initdb.d/10_migration_clinical_alerts.sql
+      - ./backend/sql/11_migration_offline_sync.sql:/docker-entrypoint-initdb.d/11_migration_offline_sync.sql
+      - ./backend/sql/12_migration_audit_trail.sql:/docker-entrypoint-initdb.d/12_migration_audit_trail.sql
+      - ./backend/sql/13_migration_data_protection_compliance.sql:/docker-entrypoint-initdb.d/13_migration_data_protection_compliance.sql
+    networks:
+      - rimai_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: rimai_api
+    restart: always
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET es obligatorio — defínalo en .env}
+      CORS_ORIGINS: ${CORS_ORIGINS:?CORS_ORIGINS es obligatorio — defínalo en .env}
+      EVALUAR_ALERTAS_EN_RESUMEN: ${EVALUAR_ALERTAS_EN_RESUMEN:-false}
+      ALLOW_PUBLIC_REGISTER: ${ALLOW_PUBLIC_REGISTER:-true}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - rimai_net
+
+  pgadmin:
+    profiles: ["dev"]
+    image: dpage/pgadmin4:8.14
+    container_name: rimai_pgadmin
+    restart: always
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD}
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "True"
+    ports:
+      - "5050:80"
+    volumes:
+      - rimai_pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - rimai_net
+
+volumes:
+  rimai_pgdata:
+  rimai_pgadmin_data:
+
+networks:
+  rimai_net:
+    driver: bridge

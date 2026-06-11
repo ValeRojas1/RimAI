@@ -1,25 +1,15 @@
-import os
 from typing import Optional
 
-import psycopg2
 from psycopg2.extras import RealDictCursor
 
 from app.application.ports.user_repository import IUserRepository
 from app.domain.entities.user import RoleEnum, Therapist, User
+from app.infrastructure.database import get_connection
 
 
 class PostgresUserRepository(IUserRepository):
-    def __init__(self):
-        self.database_url = os.getenv(
-            "DATABASE_URL",
-            "postgresql://rimai_user:rimai_secure_2026@db:5432/rimai_db",
-        )
-
-    def _connect(self):
-        return psycopg2.connect(self.database_url)
-
     def get_by_email(self, email: str) -> Optional[User]:
-        with self._connect() as conn:
+        with get_connection() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(
                     """
@@ -48,7 +38,7 @@ class PostgresUserRepository(IUserRepository):
         return User(**data)
 
     def create_family_user(self, user: User) -> User:
-        with self._connect() as conn:
+        with get_connection() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(
                     """
@@ -78,7 +68,7 @@ class PostgresUserRepository(IUserRepository):
         )
 
     def create_therapist(self, therapist: Therapist) -> Therapist:
-        with self._connect() as conn:
+        with get_connection() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(
                     """
@@ -120,7 +110,7 @@ class PostgresUserRepository(IUserRepository):
         )
 
     def get_by_id(self, user_id: str) -> Optional[User]:
-        with self._connect() as conn:
+        with get_connection() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 cur.execute(
                     """

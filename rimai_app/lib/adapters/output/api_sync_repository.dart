@@ -59,7 +59,7 @@ class ApiSyncRepository implements ISyncPort {
   @override
   Future<ReporteAnalitico> fetchReporte(
       int patientId, DateTime inicio, DateTime fin) async {
-    final uri = Uri.parse('$baseUrl/api/v1/seguimiento/reportes/$patientId')
+    final uri = Uri.parse('$baseUrl/api/v1/reportes/$patientId')
         .replace(queryParameters: {
       'inicio': inicio.toIso8601String(),
       'fin': fin.toIso8601String(),

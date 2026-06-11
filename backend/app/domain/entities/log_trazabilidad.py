@@ -1,10 +1,10 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Union
 from datetime import datetime
 
 class LogTrazabilidad(BaseModel):
     id: Optional[int] = None
-    usuario_id: int
+    usuario_id: Union[int, str]
     rol_usuario: str
     accion: str
     entidad_afectada: str

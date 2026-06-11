@@ -55,7 +55,7 @@ class _ProgressScreenState extends ConsumerState<ProgressScreen> {
         },
         items: [
           BottomNavItem(icon: Icons.home, label: 'Inicio'),
-          BottomNavItem(icon: Icons.spatial_audio_off, label: 'Plan'),
+          BottomNavItem(icon: Icons.spatial_audio_off, label: 'Sesion'),
           BottomNavItem(icon: Icons.auto_awesome, label: 'Apoyo'),
           BottomNavItem(icon: Icons.insights, label: 'Progreso'),
         ],
@@ -143,8 +143,8 @@ class _ProgressScreenState extends ConsumerState<ProgressScreen> {
         const SizedBox(width: 8),
         IconButton(
           tooltip: 'Reporte',
-          icon: const Icon(Icons.description_outlined,
-              color: Color(0xFF4A624D)),
+          icon:
+              const Icon(Icons.description_outlined, color: Color(0xFF4A624D)),
           onPressed: () => context.go('/terapeuta/reportes/${widget.ninoId}'),
         ),
       ],
@@ -543,13 +543,12 @@ class _SessionRow extends StatelessWidget {
               children: [
                 Text('Sesion $fechaTexto',
                     style: const TextStyle(
-                        color: Color(0xFF1E1B16),
-                        fontWeight: FontWeight.w800)),
+                        color: Color(0xFF1E1B16), fontWeight: FontWeight.w800)),
                 const SizedBox(height: 4),
                 Text(
                   '${session.totalAciertos}/${session.totalIntentos} aciertos, ayuda ${session.promedioAyuda.toStringAsFixed(1)}, cumplimiento ${(session.cumplimiento * 100).round()}%',
-                  style: const TextStyle(
-                      color: Color(0xFF58423B), fontSize: 12),
+                  style:
+                      const TextStyle(color: Color(0xFF58423B), fontSize: 12),
                 ),
               ],
             ),

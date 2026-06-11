@@ -1,12 +1,12 @@
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Union
 from datetime import datetime
 
 class ActividadEjecutada(BaseModel):
     id: Optional[str] = None # UUID desde el frontend (SQLite)
-    patient_id: int
+    patient_id: Union[int, str]
     actividad_id: str
-    plan_id: int
+    plan_id: Union[int, str]
     tiempo_empleado_segundos: int
     nivel_apoyo_requerido: int # 0=Independiente, 1=Verbal, 2=Físico parcial, etc.
     observaciones: str
