@@ -9,6 +9,7 @@ from app.application.usecases.sincronizar_datos_usecase import SincronizarDatosU
 from app.domain.entities.actividad_ejecutada import ActividadEjecutada
 from app.domain.entities.user import RoleEnum
 from app.infrastructure.authorization import (
+    autorizar_descarga_documento_clinico,
     campos_perfil_editables_por_rol,
     resolve_nino_id_for_clinical_file,
     verify_tutor_owns_patient,
@@ -75,6 +76,44 @@ def test_sync_rechaza_paciente_ajeno(mock_verify):
     ]
     with pytest.raises(ValueError, match="foreign"):
         uc.execute("tutor-u1", actividades)
+
+
+@patch("app.infrastructure.authorization.get_connection")
+def test_descarga_documento_terapeuta_paciente_pendiente(mock_conn):
+    cur = MagicMock()
+    cur.fetchone.side_effect = [
+        {"terapeuta_id": None, "tutor_id": "tu-1"},
+        {"id": "t-self"},
+    ]
+    conn = MagicMock()
+    conn.cursor.return_value.__enter__ = MagicMock(return_value=cur)
+    conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+    mock_conn.return_value.__enter__ = MagicMock(return_value=conn)
+    mock_conn.return_value.__exit__ = MagicMock(return_value=False)
+
+    autorizar_descarga_documento_clinico(
+        "nino-pendiente", {"id": "u1", "role": "terapeuta"}
+    )
+
+
+@patch("app.infrastructure.authorization.get_connection")
+def test_descarga_documento_terapeuta_no_asignado_bloqueado(mock_conn):
+    cur = MagicMock()
+    cur.fetchone.side_effect = [
+        {"terapeuta_id": "t-other", "tutor_id": "tu-1"},
+        {"id": "t-self"},
+    ]
+    conn = MagicMock()
+    conn.cursor.return_value.__enter__ = MagicMock(return_value=cur)
+    conn.cursor.return_value.__exit__ = MagicMock(return_value=False)
+    mock_conn.return_value.__enter__ = MagicMock(return_value=conn)
+    mock_conn.return_value.__exit__ = MagicMock(return_value=False)
+
+    with pytest.raises(HTTPException) as exc:
+        autorizar_descarga_documento_clinico(
+            "nino-ajeno", {"id": "u1", "role": "terapeuta"}
+        )
+    assert exc.value.status_code == 403
 
 
 @patch("app.infrastructure.authorization.get_connection")

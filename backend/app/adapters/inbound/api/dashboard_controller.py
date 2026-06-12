@@ -38,6 +38,7 @@ from app.ai.motor import motor_adaptativo
 from app.infrastructure.authorization import (
     autorizar_acceso_nino,
     campos_perfil_editables_por_rol,
+    autorizar_descarga_documento_clinico,
     resolve_nino_id_for_clinical_file,
 )
 from app.infrastructure.config import evaluar_alertas_en_resumen
@@ -190,7 +191,7 @@ def descargar_documento_clinico(
     nino_id = resolve_nino_id_for_clinical_file(safe_name)
     if not nino_id:
         raise HTTPException(status_code=404, detail="Documento no encontrado")
-    autorizar_acceso_nino(nino_id, current_user)
+    autorizar_descarga_documento_clinico(nino_id, current_user)
     storage = CloudStorageAdapter()
     path = os.path.join(storage.upload_dir, safe_name)
     if not os.path.isfile(path):

@@ -38,7 +38,7 @@ def autorizar_acceso_nino(nino_id: str, current_user: Dict[str, Any]) -> None:
                     (current_user["id"],),
                 )
                 ter = cur.fetchone()
-                if not ter or acceso["terapeuta_id"] != ter["id"]:
+                if not ter or str(acceso["terapeuta_id"]) != str(ter["id"]):
                     raise HTTPException(status_code=403, detail="Acceso denegado al nino")
             elif role in ("padre_tutor", "tutor", "padre"):
                 cur.execute(
@@ -46,10 +46,51 @@ def autorizar_acceso_nino(nino_id: str, current_user: Dict[str, Any]) -> None:
                     (current_user["id"],),
                 )
                 tutor = cur.fetchone()
-                if not tutor or acceso["tutor_id"] != tutor["id"]:
+                if not tutor or str(acceso["tutor_id"]) != str(tutor["id"]):
                     raise HTTPException(status_code=403, detail="Acceso denegado al nino")
             elif role != "admin":
                 raise HTTPException(status_code=403, detail="Acceso denegado")
+
+
+def autorizar_descarga_documento_clinico(
+    nino_id: str, current_user: Dict[str, Any]
+) -> None:
+    """Descarga de PDFs: tutor del nino, terapeuta asignado o terapeuta en bandeja pendiente."""
+    with get_connection() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                "SELECT terapeuta_id, tutor_id FROM ninos WHERE id = %s AND activo = TRUE",
+                (nino_id,),
+            )
+            acceso = cur.fetchone()
+            if not acceso:
+                raise HTTPException(status_code=404, detail="Documento no encontrado")
+            role = current_user.get("role")
+            if role == "admin":
+                return
+            if role == "terapeuta":
+                cur.execute(
+                    "SELECT id FROM terapeutas WHERE usuario_id = %s",
+                    (current_user["id"],),
+                )
+                ter = cur.fetchone()
+                if not ter:
+                    raise HTTPException(status_code=403, detail="Acceso denegado al nino")
+                if acceso["terapeuta_id"] is None:
+                    return
+                if str(acceso["terapeuta_id"]) == str(ter["id"]):
+                    return
+                raise HTTPException(status_code=403, detail="Acceso denegado al nino")
+            if role in ("padre_tutor", "tutor", "padre"):
+                cur.execute(
+                    "SELECT id FROM padres_tutores WHERE usuario_id = %s",
+                    (current_user["id"],),
+                )
+                tutor = cur.fetchone()
+                if tutor and str(acceso["tutor_id"]) == str(tutor["id"]):
+                    return
+                raise HTTPException(status_code=403, detail="Acceso denegado al nino")
+            raise HTTPException(status_code=403, detail="Acceso denegado")
 
 
 def campos_perfil_editables_por_rol(role: str) -> Set[str]:
