@@ -14,7 +14,12 @@ _DEV_CORS_ORIGINS = (
     "https://rimai-production.up.railway.app"
 )
 
-_JWT_SECRET_ENV_NAMES = ("JWT_SECRET", "JWT_SECRET_KEY", "SECRET_KEY")
+_JWT_SECRET_ENV_NAMES = (
+    "JWT_SECRET",
+    "JWT_SECRET_KEY",
+    "SECRET_KEY",
+    "jwt_secret",  # error comun al pegar en Railway
+)
 _DATABASE_URL_ENV_NAMES = ("DATABASE_URL", "DATABASE_PRIVATE_URL")
 
 
@@ -89,6 +94,24 @@ def _resolve_jwt_secret() -> str | None:
     return _first_env_value(_JWT_SECRET_ENV_NAMES)
 
 
+def _jwt_secret_diagnostic() -> str:
+    details: list[str] = []
+    for name in _JWT_SECRET_ENV_NAMES:
+        raw = os.getenv(name)
+        if raw is None:
+            details.append(f"{name}=ausente")
+        elif not raw.strip():
+            details.append(f"{name}=vacia")
+        else:
+            details.append(f"{name}=ok({len(raw.strip())} chars)")
+    similar = sorted(
+        key for key in os.environ if "jwt" in key.lower() or key.lower() == "secret_key"
+    )
+    if similar:
+        details.append(f"claves_similares={','.join(similar)}")
+    return " Diagnostico JWT: " + "; ".join(details) + "."
+
+
 def validate_startup_config() -> None:
     """Falla al arranque si faltan variables críticas (evita 500 en login)."""
     missing: list[str] = []
@@ -97,8 +120,10 @@ def validate_startup_config() -> None:
     if not _resolve_database_url():
         missing.append("DATABASE_URL")
     if missing:
+        extra = _jwt_secret_diagnostic() if "JWT_SECRET" in missing else ""
         raise RuntimeError(
             f"Variables obligatorias no definidas: {', '.join(missing)}."
+            f"{extra}"
             f"{_railway_setup_hint(missing)}"
         )
 
