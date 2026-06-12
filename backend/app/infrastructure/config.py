@@ -148,8 +148,7 @@ def evaluar_alertas_en_resumen() -> bool:
 
 
 def allow_public_register() -> bool:
-    default = "true" if _TEST_DEFAULTS_ALLOWED else "false"
-    return os.getenv("ALLOW_PUBLIC_REGISTER", default).lower() in ("1", "true", "yes")
+    return os.getenv("ALLOW_PUBLIC_REGISTER", "true").lower() in ("1", "true", "yes")
 
 
 def get_db_pool_min() -> int:

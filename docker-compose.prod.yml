@@ -1,4 +1,4 @@
-# Producción: sin puertos DB expuestos, sin seeds demo, registro público deshabilitado.
+# Producción final: sin puertos DB expuestos ni seeds demo.
 services:
   db:
     ports: !reset []
@@ -18,8 +18,6 @@ services:
 
   api:
     volumes: !reset []
-    environment:
-      ALLOW_PUBLIC_REGISTER: "false"
 
   pgadmin:
     profiles: ["disabled"]

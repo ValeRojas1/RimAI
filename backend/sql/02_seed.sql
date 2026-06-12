@@ -193,5 +193,5 @@ BEGIN
     (v_sesion_id, v_act2_id, 3.8, 6, 10, 1, 'Medio', 'Requirio apoyo verbal para sostener atencion.'),
     (v_sesion_id, v_act3_id, 1.9, 9, 10, 0, 'Bajo', 'Transicion de cierre estable.');
 
-  RAISE NOTICE 'RimAI seed listo. Consulte README de desarrollo para credenciales demo.';
+  RAISE NOTICE 'RimAI seed listo: terapeuta@rimai.com / test1234';
 END $$;
