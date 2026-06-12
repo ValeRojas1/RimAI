@@ -48,17 +48,32 @@ def get_database_url() -> str:
     return _require("DATABASE_URL", os.getenv("DATABASE_URL"))
 
 
+def _infer_railway_cors_origins() -> list[str] | None:
+    """Orígenes inferidos de variables que Railway inyecta en cada despliegue."""
+    origins: list[str] = []
+    domain = (os.getenv("RAILWAY_PUBLIC_DOMAIN") or "").strip()
+    static_url = (os.getenv("RAILWAY_STATIC_URL") or "").strip().rstrip("/")
+    if domain:
+        origins.append(f"https://{domain}")
+    if static_url and static_url not in origins:
+        origins.append(static_url)
+    return origins or None
+
+
 def get_cors_origins() -> list[str]:
     raw = os.getenv("CORS_ORIGINS")
-    if not raw:
-        if _TEST_DEFAULTS_ALLOWED:
-            raw = _DEV_CORS_ORIGINS
-        else:
-            raise RuntimeError(
-                "Variable de entorno obligatoria no definida: CORS_ORIGINS. "
-                "Configure orígenes permitidos separados por coma."
-            )
-    return [origin.strip() for origin in raw.split(",") if origin.strip()]
+    if raw:
+        return [origin.strip() for origin in raw.split(",") if origin.strip()]
+    if _TEST_DEFAULTS_ALLOWED:
+        raw = _DEV_CORS_ORIGINS
+        return [origin.strip() for origin in raw.split(",") if origin.strip()]
+    railway_origins = _infer_railway_cors_origins()
+    if railway_origins:
+        return railway_origins
+    raise RuntimeError(
+        "Variable de entorno obligatoria no definida: CORS_ORIGINS. "
+        "Configure orígenes permitidos separados por coma."
+    )
 
 
 def evaluar_alertas_en_resumen() -> bool:
