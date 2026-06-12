@@ -14,9 +14,44 @@ _DEV_CORS_ORIGINS = (
     "https://rimai-production.up.railway.app"
 )
 
+_JWT_SECRET_ENV_NAMES = ("JWT_SECRET", "JWT_SECRET_KEY", "SECRET_KEY")
+_DATABASE_URL_ENV_NAMES = ("DATABASE_URL", "DATABASE_PRIVATE_URL")
+
 
 def test_defaults_allowed() -> bool:
     return _TEST_DEFAULTS_ALLOWED
+
+
+def _first_env_value(names: tuple[str, ...]) -> str | None:
+    for name in names:
+        value = (os.getenv(name) or "").strip()
+        if value:
+            return value
+    return None
+
+
+def _is_railway_runtime() -> bool:
+    return bool(
+        os.getenv("RAILWAY_ENVIRONMENT")
+        or os.getenv("RAILWAY_PUBLIC_DOMAIN")
+        or os.getenv("RAILWAY_SERVICE_ID")
+    )
+
+
+def _railway_setup_hint(missing: list[str]) -> str:
+    if not _is_railway_runtime():
+        return " Configure .env o consulte .env.example."
+    hints = []
+    if "JWT_SECRET" in missing:
+        hints.append(
+            "En Railway → Variables del servicio API, agregue JWT_SECRET "
+            "(ej.: openssl rand -hex 32)."
+        )
+    if "DATABASE_URL" in missing:
+        hints.append(
+            "En Railway, vincule el servicio PostgreSQL al backend para inyectar DATABASE_URL."
+        )
+    return " " + " ".join(hints)
 
 
 def _require(name: str, value: str | None) -> str:
@@ -24,20 +59,52 @@ def _require(name: str, value: str | None) -> str:
         return value
     if _TEST_DEFAULTS_ALLOWED:
         if name == "JWT_SECRET":
-            return os.getenv("JWT_SECRET") or "test-jwt-secret-rimai-pytest-only"
+            return _first_env_value(_JWT_SECRET_ENV_NAMES) or "test-jwt-secret-rimai-pytest-only"
         if name == "DATABASE_URL":
             return (
-                os.getenv("DATABASE_URL")
+                _resolve_database_url()
                 or "postgresql://rimai_user:rimai_secure_2026@localhost:5432/rimai_db"
             )
     raise RuntimeError(
-        f"Variable de entorno obligatoria no definida: {name}. "
-        "Configure .env o consulte .env.example."
+        f"Variable de entorno obligatoria no definida: {name}."
+        f"{_railway_setup_hint([name])}"
     )
 
 
+def _resolve_database_url() -> str | None:
+    url = _first_env_value(_DATABASE_URL_ENV_NAMES)
+    if url:
+        return url
+    user = (os.getenv("PGUSER") or os.getenv("POSTGRES_USER") or "").strip()
+    password = (os.getenv("PGPASSWORD") or os.getenv("POSTGRES_PASSWORD") or "").strip()
+    host = (os.getenv("PGHOST") or os.getenv("POSTGRES_HOST") or "").strip()
+    port = (os.getenv("PGPORT") or os.getenv("POSTGRES_PORT") or "5432").strip()
+    database = (os.getenv("PGDATABASE") or os.getenv("POSTGRES_DB") or "").strip()
+    if user and password and host and database:
+        return f"postgresql://{user}:{password}@{host}:{port}/{database}"
+    return None
+
+
+def _resolve_jwt_secret() -> str | None:
+    return _first_env_value(_JWT_SECRET_ENV_NAMES)
+
+
+def validate_startup_config() -> None:
+    """Falla al arranque si faltan variables críticas (evita 500 en login)."""
+    missing: list[str] = []
+    if not _resolve_jwt_secret():
+        missing.append("JWT_SECRET")
+    if not _resolve_database_url():
+        missing.append("DATABASE_URL")
+    if missing:
+        raise RuntimeError(
+            f"Variables obligatorias no definidas: {', '.join(missing)}."
+            f"{_railway_setup_hint(missing)}"
+        )
+
+
 def get_jwt_secret() -> str:
-    return _require("JWT_SECRET", os.getenv("JWT_SECRET"))
+    return _require("JWT_SECRET", _resolve_jwt_secret())
 
 
 def get_jwt_algorithm() -> str:
@@ -45,7 +112,7 @@ def get_jwt_algorithm() -> str:
 
 
 def get_database_url() -> str:
-    return _require("DATABASE_URL", os.getenv("DATABASE_URL"))
+    return _require("DATABASE_URL", _resolve_database_url())
 
 
 def _infer_railway_cors_origins() -> list[str] | None:

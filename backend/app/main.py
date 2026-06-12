@@ -21,7 +21,7 @@ from app.adapters.inbound.api.exception_handlers import (
     unhandled_exception_handler,
     validation_exception_handler,
 )
-from app.infrastructure.config import get_cors_origins
+from app.infrastructure.config import get_cors_origins, validate_startup_config
 from app.infrastructure.database import close_db_pool, init_db_pool
 from app.infrastructure.rate_limit import limiter
 
@@ -51,6 +51,7 @@ app.add_exception_handler(Exception, unhandled_exception_handler)
 
 @app.on_event("startup")
 def on_startup():
+    validate_startup_config()
     init_db_pool()
 
 

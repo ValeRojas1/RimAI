@@ -47,6 +47,13 @@ async def psycopg2_exception_handler(_request: Request, exc: psycopg2.Error) -> 
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     if isinstance(exc, HTTPException):
         return await http_exception_handler(request, exc)
+    if isinstance(exc, RuntimeError) and "Variable de entorno obligatoria" in str(exc):
+        logger.error("Configuración incompleta: %s", exc)
+        return _error_body(
+            "Servicio mal configurado. Contacte al administrador.",
+            "CONFIG_ERROR",
+            503,
+        )
     logger.exception("Error interno no controlado: %s", exc)
     return _error_body(
         "Error interno del servidor.",
