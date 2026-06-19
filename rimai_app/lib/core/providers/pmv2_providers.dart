@@ -445,6 +445,7 @@ class SolicitudAjusteData {
   final double? tasaAciertos;
   final int? muestras;
   final String? observacionTutor;
+  final DateTime? solicitadaEn;
 
   SolicitudAjusteData({
     required this.id,
@@ -455,6 +456,7 @@ class SolicitudAjusteData {
     this.tasaAciertos,
     this.muestras,
     this.observacionTutor,
+    this.solicitadaEn,
   });
 
   factory SolicitudAjusteData.fromJson(dynamic raw) {
@@ -468,6 +470,7 @@ class SolicitudAjusteData {
       tasaAciertos: (j['tasa_aciertos'] as num?)?.toDouble(),
       muestras: (j['muestras'] as num?)?.toInt(),
       observacionTutor: j['observacion_tutor']?.toString(),
+      solicitadaEn: DateTime.tryParse(j['created_at']?.toString() ?? ''),
     );
   }
 }
@@ -482,6 +485,9 @@ class ActividadRevisionSesion {
   final String nivelDificultadUsado;
   final int nivelAyudaRequerido;
   final String? observaciones;
+  final DateTime? iniciadoEn;
+  final DateTime? completadoEn;
+  final double duracionSegundos;
   final SolicitudAjusteData? solicitudAjuste;
 
   ActividadRevisionSesion({
@@ -494,6 +500,9 @@ class ActividadRevisionSesion {
     required this.nivelDificultadUsado,
     required this.nivelAyudaRequerido,
     this.observaciones,
+    this.iniciadoEn,
+    this.completadoEn,
+    this.duracionSegundos = 0,
     this.solicitudAjuste,
   });
 
@@ -509,6 +518,9 @@ class ActividadRevisionSesion {
       nivelDificultadUsado: j['nivel_dificultad_usado']?.toString() ?? 'Medio',
       nivelAyudaRequerido: (j['nivel_ayuda_requerido'] as num?)?.toInt() ?? 0,
       observaciones: j['observaciones']?.toString(),
+      iniciadoEn: DateTime.tryParse(j['iniciado_en']?.toString() ?? ''),
+      completadoEn: DateTime.tryParse(j['completado_en']?.toString() ?? ''),
+      duracionSegundos: (j['duracion_segundos'] as num?)?.toDouble() ?? 0,
       solicitudAjuste: j['solicitud_ajuste'] == null
           ? null
           : SolicitudAjusteData.fromJson(j['solicitud_ajuste']),
@@ -521,6 +533,8 @@ class SesionRevisionData {
   final String planId;
   final int sesionNumero;
   final DateTime? fecha;
+  final DateTime? fechaInicio;
+  final DateTime? fechaFin;
   final double tasaAciertos;
   final int totalAciertos;
   final int totalIntentos;
@@ -531,11 +545,16 @@ class SesionRevisionData {
     required this.planId,
     required this.sesionNumero,
     this.fecha,
+    this.fechaInicio,
+    this.fechaFin,
     required this.tasaAciertos,
     required this.totalAciertos,
     required this.totalIntentos,
     required this.actividades,
   });
+
+  /// Inicio efectivo de la sesion (primera actividad) con respaldo en `fecha`.
+  DateTime? get inicioEfectivo => fechaInicio ?? fecha;
 
   factory SesionRevisionData.fromJson(dynamic raw) {
     final j = _toMap(raw);
@@ -544,6 +563,8 @@ class SesionRevisionData {
       planId: j['plan_id']?.toString() ?? '',
       sesionNumero: (j['sesion_numero'] as num?)?.toInt() ?? 1,
       fecha: DateTime.tryParse(j['fecha']?.toString() ?? ''),
+      fechaInicio: DateTime.tryParse(j['fecha_inicio']?.toString() ?? ''),
+      fechaFin: DateTime.tryParse(j['fecha_fin']?.toString() ?? ''),
       tasaAciertos: (j['tasa_aciertos'] as num?)?.toDouble() ?? 0,
       totalAciertos: (j['total_aciertos'] as num?)?.toInt() ?? 0,
       totalIntentos: (j['total_intentos'] as num?)?.toInt() ?? 0,

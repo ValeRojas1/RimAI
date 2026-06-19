@@ -4298,7 +4298,8 @@ def obtener_sesiones_revision(
                         ra.tiempo_respuesta,
                         ra.nivel_ayuda_requerido,
                         ra.nivel_dificultad_usado,
-                        ra.observaciones
+                        ra.observaciones,
+                        ra.timestamp AS registrado_en
                     FROM resultados_actividad ra
                     JOIN actividades a ON a.id = ra.actividad_id
                     WHERE ra.sesion_id = ANY(%s::uuid[])
@@ -4357,6 +4358,8 @@ def obtener_sesiones_revision(
     for sesion in sesiones:
         sid = str(sesion["sesion_id"])
         actividades = []
+        inicios_actividad: List[datetime] = []
+        fines_actividad: List[datetime] = []
         for actividad in resultados_por_sesion.get(sid, []):
             aid = str(actividad["actividad_id"])
             solicitud = next(
@@ -4365,6 +4368,20 @@ def obtener_sesiones_revision(
             )
             intentos = int(actividad["repeticiones"] or 0)
             aciertos = int(actividad["aciertos"] or 0)
+            # Trazabilidad temporal por actividad (derivada): el resultado se registra al
+            # completar la actividad, por lo que `registrado_en` aproxima la hora de fin y
+            # `inicio = fin - tiempo_respuesta` aproxima la hora en que se inicio.
+            completado_en = actividad["registrado_en"]
+            duracion_segundos = float(actividad["tiempo_respuesta"] or 0)
+            iniciado_en = (
+                completado_en - timedelta(seconds=duracion_segundos)
+                if completado_en is not None
+                else None
+            )
+            if iniciado_en is not None:
+                inicios_actividad.append(iniciado_en)
+            if completado_en is not None:
+                fines_actividad.append(completado_en)
             actividades.append({
                 "actividad_id": aid,
                 "actividad_nombre": actividad["actividad_nombre"],
@@ -4376,13 +4393,21 @@ def obtener_sesiones_revision(
                 "nivel_ayuda_requerido": actividad["nivel_ayuda_requerido"],
                 "nivel_dificultad_usado": actividad["nivel_dificultad_usado"],
                 "observaciones": actividad["observaciones"],
+                "iniciado_en": iniciado_en.isoformat() if iniciado_en else None,
+                "completado_en": completado_en.isoformat() if completado_en else None,
+                "duracion_segundos": duracion_segundos,
                 "solicitud_ajuste": solicitud,
             })
+        # La sesion inicia con la primera actividad y termina con la ultima registrada.
+        sesion_inicio = min(inicios_actividad) if inicios_actividad else sesion["fecha_inicio"]
+        sesion_fin = max(fines_actividad) if fines_actividad else None
         payload_sesiones.append({
             "id": sid,
             "plan_id": str(sesion["plan_id"]),
             "sesion_numero": int(sesion["sesion_numero"] or 1),
             "fecha": sesion["fecha_inicio"].isoformat(),
+            "fecha_inicio": sesion_inicio.isoformat() if sesion_inicio else None,
+            "fecha_fin": sesion_fin.isoformat() if sesion_fin else None,
             "tasa_aciertos": float(sesion["tasa_aciertos"] or 0),
             "total_aciertos": int(sesion["total_aciertos"] or 0),
             "total_intentos": int(sesion["total_intentos"] or 0),
