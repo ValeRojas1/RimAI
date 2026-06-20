@@ -33,6 +33,7 @@ jobs:
         run: pip install -r requirements.txt
       - name: Run pytest
         env:
+          PYTHONPATH: .
           RIMAI_ALLOW_TEST_DEFAULTS: '1'
           JWT_SECRET: test-ci-jwt-secret
           DATABASE_URL: postgresql://rimai:rimai@localhost:5432/rimai_test
