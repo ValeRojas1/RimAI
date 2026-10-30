@@ -1,5 +1,7 @@
 # RimAI — Plataforma Terapéutica Adaptativa con IA para niños con TEA
 
+> Tengo acceso a este repo
+
 ## Requisitos previos
 - Flutter SDK 3.x
 - Docker Desktop 4.x
